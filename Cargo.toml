@@ -1,5 +1,5 @@
 [package]
-name = "embassy_rp_w_template"
+name = "rusty_badger"
 version = "0.1.0"
 edition = "2021"
 
@@ -55,7 +55,6 @@ cyw43 = { version = "0.2.0", git = "https://github.com/embassy-rs/embassy.git", 
 ] }
 cyw43-pio = { version = "0.2.0", git = "https://github.com/embassy-rs/embassy.git", rev = "f0a86070512ad739641cee7d9fa39d63f5c8a9f6", features = [
     "defmt",
-    "overclock",
 ] }
 
 defmt = "0.3"
@@ -78,8 +77,6 @@ critical-section = "1.1"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 display-interface-spi = "0.4.1"
 embedded-graphics = "0.8.0"
-st7789 = "0.6.1"
-display-interface = "0.4.1"
 byte-slice-cast = { version = "1.2.0", default-features = false }
 smart-leds = "0.3.0"
 heapless = { version = "0.8", features = ["serde"] }
@@ -97,8 +94,6 @@ pio-proc = "0.2"
 pio = "0.2.1"
 rand = { version = "0.8.5", default-features = false }
 embedded-sdmmc = "0.7.0"
-bt-hci = { version = "0.1.0", default-features = false, features = ["defmt"] }
-trouble-host = { version = "0.1.0", features = ["defmt", "gatt"] }
 uc8151 = { git = "https://github.com/9names/uc8151-rs.git", features = [
     "graphics",
 ] }

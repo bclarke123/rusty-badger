@@ -2,13 +2,15 @@ use embedded_graphics::prelude::Point;
 
 use super::CURRENT_IMAGE;
 
-static NUMBER_OF_IMAGES: u8 = 2;
+static NUMBER_OF_IMAGES: u8 = 3;
 static FERRIS_IMG: &[u8; 15722] = include_bytes!("../../images/ferris_w_a_knife.bmp");
 static REPO_IMG: &[u8; 11262] = include_bytes!("../../images/repo.bmp");
+static MTRAS_LOGO: &[u8; 10378] = include_bytes!("../../images/mtras_logo.bmp");
 
 pub enum DisplayImage {
     Ferris = 0,
     Repo = 1,
+    MtrasLogo = 2,
 }
 
 pub fn get_current_image() -> DisplayImage {
@@ -20,6 +22,7 @@ impl DisplayImage {
         match value {
             0 => Some(Self::Ferris),
             1 => Some(Self::Repo),
+            2 => Some(Self::MtrasLogo),
             _ => None,
         }
     }
@@ -28,6 +31,7 @@ impl DisplayImage {
         match self {
             Self::Ferris => 0,
             Self::Repo => 1,
+            Self::MtrasLogo => 2,
         }
     }
 
@@ -35,6 +39,7 @@ impl DisplayImage {
         match self {
             Self::Ferris => FERRIS_IMG,
             Self::Repo => REPO_IMG,
+            Self::MtrasLogo => MTRAS_LOGO,
         }
     }
 
@@ -57,6 +62,7 @@ impl DisplayImage {
         match self {
             Self::Ferris => Point::new(150, 26),
             Self::Repo => Point::new(190, 26),
+            Self::MtrasLogo => Point::new(190, 26),
         }
     }
 }

@@ -32,7 +32,11 @@ use uc8151::WIDTH;
 use uc8151::{asynch::Uc8151, HEIGHT};
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::{env::env_value, helpers::easy_format, Spi0Bus};
+use crate::{
+    env::env_value,
+    helpers::{easy_format, easy_format_str},
+    Spi0Bus,
+};
 
 pub type RecentWifiNetworksVec = Vec<String<32>, 4>;
 
@@ -91,16 +95,16 @@ pub async fn run_the_display(
         .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
         .draw(&mut display)
         .unwrap();
-
-    // Create the text box and apply styling options.
-    let display_text = easy_format::<29>(format_args!(
-        "{}\n{}",
-        env_value("NAME"),
-        env_value("DETAILS")
-    ));
+    info!("Name: {}", env_value("NAME"));
+    info!("Details: {}", env_value("DETAILS"));
+    let mut name_and_details_buffer = [0; 128];
+    let name_and_details = easy_format_str(
+        format_args!("{}\n{}", env_value("NAME"), env_value("DETAILS")),
+        &mut name_and_details_buffer,
+    );
 
     let name_and_detail_box = TextBox::with_textbox_style(
-        &display_text,
+        &name_and_details.unwrap(),
         name_and_detail_bounds,
         character_style,
         textbox_style,

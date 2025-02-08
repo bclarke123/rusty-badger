@@ -328,14 +328,17 @@ async fn main(spawner: Spawner) {
 
             let mut recent_networks = RecentWifiNetworksVec::new();
             let mut scanner = control.scan(Default::default()).await;
+
             while let Some(bss) = scanner.next().await {
                 process_bssid(bss.bssid, &mut save.wifi_counted, &mut save.bssid);
                 if recent_networks.len() < 8 {
                     let possible_ssid = core::str::from_utf8(&bss.ssid);
                     match possible_ssid {
                         Ok(ssid) => {
-                            info!("ssid: {}", ssid);
-                            let ssid_string = easy_format::<32>(format_args!("{}", ssid.trim()));
+                            let removed_zeros = ssid.trim_end_matches(char::from(0));
+                            let ssid_string: String<32> =
+                                easy_format::<32>(format_args!("{}", removed_zeros));
+
                             if recent_networks.contains(&ssid_string) {
                                 continue;
                             }
