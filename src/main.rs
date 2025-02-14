@@ -248,10 +248,11 @@ async fn main(spawner: Spawner) {
                 };
                 rtc.set_datetime(rtc_time).unwrap();
                 time_was_set = true;
+                let _ = control.leave().await;
             }
             Err(_e) => {
                 error!("Failed to parse response body");
-                return; // handle the error
+                // return; // handle the error
             }
         }
     }
@@ -342,7 +343,9 @@ async fn main(spawner: Spawner) {
                             if recent_networks.contains(&ssid_string) {
                                 continue;
                             }
-                            let _ = recent_networks.push(ssid_string);
+                            if ssid_string != "" {
+                                let _ = recent_networks.push(ssid_string);
+                            }
                         }
                         Err(_) => {
                             continue;
