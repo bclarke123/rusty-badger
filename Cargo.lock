@@ -181,20 +181,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bt-hci"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d69e2db053409c36c45a403da58072b8bf75bdc962746c0a12df9dec0fce92d2"
-dependencies = [
- "defmt",
- "embassy-sync 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "embedded-io",
- "embedded-io-async",
- "futures-intrusive",
- "heapless 0.8.0",
-]
-
-[[package]]
 name = "buffered-io"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -203,12 +189,6 @@ dependencies = [
  "embedded-io",
  "embedded-io-async",
 ]
-
-[[package]]
-name = "byte-slice-cast"
-version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0a5e3906bcbf133e33c1d4d95afc664ad37fbdb9f6568d8043e7ea8c27d93d3"
 
 [[package]]
 name = "byte-slice-cast"
@@ -364,16 +344,13 @@ name = "cyw43"
 version = "0.2.0"
 source = "git+https://github.com/embassy-rs/embassy.git?rev=f0a86070512ad739641cee7d9fa39d63f5c8a9f6#f0a86070512ad739641cee7d9fa39d63f5c8a9f6"
 dependencies = [
- "bt-hci",
  "cortex-m",
  "cortex-m-rt",
- "defmt",
  "embassy-futures 0.1.1 (git+https://github.com/embassy-rs/embassy.git?rev=f0a86070512ad739641cee7d9fa39d63f5c8a9f6)",
  "embassy-net-driver-channel 0.3.0",
  "embassy-sync 0.6.0 (git+https://github.com/embassy-rs/embassy.git?rev=f0a86070512ad739641cee7d9fa39d63f5c8a9f6)",
  "embassy-time",
  "embedded-hal 1.0.0",
- "embedded-io-async",
  "futures",
  "heapless 0.8.0",
  "num_enum",
@@ -521,23 +498,6 @@ dependencies = [
  "libc",
  "redox_users",
  "winapi",
-]
-
-[[package]]
-name = "display-interface"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7517c040926d7b02b111884aa089177db80878533127f7c1b480d852c5fb4112"
-
-[[package]]
-name = "display-interface-spi"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "489378ad054862146fbd1f09f51d585ccbe4bd1e2feadcda2a13ac33f840e1a5"
-dependencies = [
- "byte-slice-cast 0.3.5",
- "display-interface",
- "embedded-hal 0.2.7",
 ]
 
 [[package]]
@@ -735,19 +695,6 @@ dependencies = [
  "rp-pac",
  "rp2040-boot2",
  "sha2-const-stable",
-]
-
-[[package]]
-name = "embassy-sync"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3e0c49ff02ebe324faf3a8653ba91582e2d0a7fdef5bc88f449d5aa1bfcc05c"
-dependencies = [
- "cfg-if",
- "critical-section",
- "embedded-io-async",
- "futures-util",
- "heapless 0.8.0",
 ]
 
 [[package]]
@@ -1157,16 +1104,6 @@ name = "futures-core"
 version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfc6580bb841c5a68e9ef15c77ccc837b40a7504914d52e47b8b0e9bbda25a1d"
-
-[[package]]
-name = "futures-intrusive"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f"
-dependencies = [
- "futures-core",
- "lock_api",
-]
 
 [[package]]
 name = "futures-io"
@@ -1933,15 +1870,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rgb"
-version = "0.8.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ade4539f42266ded9e755c605bdddf546242b2c961b03b06a7375260788a0523"
-dependencies = [
- "bytemuck",
-]
-
-[[package]]
 name = "rp-pac"
 version = "6.0.0"
 source = "git+https://github.com/embassy-rs/rp-pac.git?rev=a7f42d25517f7124ad3b4ed492dec8b0f50a0e6c#a7f42d25517f7124ad3b4ed492dec8b0f50a0e6c"
@@ -1988,7 +1916,7 @@ name = "rusty_badger"
 version = "0.1.0"
 dependencies = [
  "assign-resources",
- "byte-slice-cast 1.2.2",
+ "byte-slice-cast",
  "cortex-m",
  "cortex-m-rt",
  "critical-section",
@@ -1996,7 +1924,6 @@ dependencies = [
  "cyw43-pio",
  "defmt",
  "defmt-rtt",
- "display-interface-spi",
  "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures 0.1.1 (git+https://github.com/embassy-rs/embassy.git)",
@@ -2029,11 +1956,9 @@ dependencies = [
  "serde",
  "serde-json-core",
  "shtcx",
- "smart-leds",
  "static_cell",
  "tinybmp",
  "uc8151",
- "usbd-hid",
 ]
 
 [[package]]
@@ -2150,24 +2075,6 @@ name = "smallvec"
 version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
-
-[[package]]
-name = "smart-leds"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38dd45fa275f70b4110eac5f5182611ad384f88bb22b68b9a9c3cafd7015290b"
-dependencies = [
- "smart-leds-trait",
-]
-
-[[package]]
-name = "smart-leds-trait"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebf6d833fa93f16a1c1874e62c2aebe8567e5bdd436d59bf543ed258b6f7a8e3"
-dependencies = [
- "rgb",
-]
 
 [[package]]
 name = "smoltcp"
