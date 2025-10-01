@@ -14,7 +14,8 @@ use core::cell::RefCell;
 use core::fmt::Write;
 use core::str::from_utf8;
 use cyw43::JoinOptions;
-use cyw43_driver::setup_cyw43;
+// use cyw43_driver::setup_cyw43;
+use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
 use defmt::info;
 use defmt::*;
 use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
@@ -26,11 +27,12 @@ use embassy_rp::clocks::RoscRng;
 use embassy_rp::flash::Async;
 use embassy_rp::gpio::Input;
 use embassy_rp::i2c::I2c;
-use embassy_rp::peripherals::{I2C0, SPI0};
+use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0, SPI0};
+use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_rp::rtc::{DateTime, DayOfWeek};
 use embassy_rp::spi::Spi;
 use embassy_rp::spi::{self};
-use embassy_rp::{gpio, i2c};
+use embassy_rp::{bind_interrupts, gpio, i2c};
 use embassy_sync::blocking_mutex::NoopMutex;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -49,7 +51,6 @@ use temp_sensor::run_the_temp_sensor;
 use {defmt_rtt as _, panic_probe as _};
 
 mod badge_display;
-mod cyw43_driver;
 mod env;
 mod helpers;
 mod save;
@@ -64,16 +65,46 @@ const SAVE_OFFSET: u32 = 0x00;
 
 const FLASH_SIZE: usize = 2 * 1024 * 1024;
 
+bind_interrupts!(struct Irqs {
+    PIO0_IRQ_0 => InterruptHandler<PIO0>;
+});
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
     let mut user_led = Output::new(p.PIN_22, Level::High);
     user_led.set_high();
 
-    let (net_device, mut control) = setup_cyw43(
-        *p.PIO0, *p.PIN_23, *p.PIN_24, *p.PIN_25, *p.PIN_29, *p.DMA_CH0, spawner,
-    )
-    .await;
+    //Wifi driver and cyw43 setup
+    let fw = include_bytes!("../cyw43-firmware/43439A0.bin");
+    let clm = include_bytes!("../cyw43-firmware/43439A0_clm.bin");
+
+    let pwr = Output::new(p.PIN_23, Level::Low);
+    let cs = Output::new(p.PIN_25, Level::High);
+    let mut pio = Pio::new(p.PIO0, Irqs);
+    let spi = PioSpi::new(
+        &mut pio.common,
+        pio.sm0,
+        DEFAULT_CLOCK_DIVIDER,
+        pio.irq0,
+        cs,
+        p.PIN_24,
+        p.PIN_29,
+        p.DMA_CH0,
+    );
+    static STATE: StaticCell<cyw43::State> = StaticCell::new();
+    let state = STATE.init(cyw43::State::new());
+    let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
+    spawner.spawn(cyw43_task(runner));
+
+    control.init(clm).await;
+    control
+        .set_power_management(cyw43::PowerManagementMode::PowerSave)
+        .await;
+    // let (net_device, mut control) = setup_cyw43(
+    //     p.PIO0, p.PIN_23, p.PIN_24, p.PIN_25, p.PIN_29, p.DMA_CH0, spawner,
+    // )
+    // .await;
 
     let miso = p.PIN_16;
     let mosi = p.PIN_19;
@@ -451,6 +482,13 @@ fn set_display_time(time: DateTime) {
 
 #[embassy_executor::task]
 async fn net_task(mut runner: embassy_net::Runner<'static, cyw43::NetDriver<'static>>) -> ! {
+    runner.run().await
+}
+
+#[embassy_executor::task]
+async fn cyw43_task(
+    runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>,
+) -> ! {
     runner.run().await
 }
 
