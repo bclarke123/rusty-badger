@@ -4,28 +4,34 @@
 
 #![no_std]
 #![no_main]
+
 use badge_display::display_image::DisplayImage;
 use badge_display::{
-    run_the_display, RecentWifiNetworksVec, Screen, CHANGE_IMAGE, CURRENT_IMAGE, DISPLAY_CHANGED,
-    FORCE_SCREEN_REFRESH, RECENT_WIFI_NETWORKS, RTC_TIME_STRING, SCREEN_TO_SHOW, WIFI_COUNT,
+    CHANGE_IMAGE, CURRENT_IMAGE, DISPLAY_CHANGED, FORCE_SCREEN_REFRESH, RECENT_WIFI_NETWORKS,
+    RTC_TIME_STRING, RecentWifiNetworksVec, SCREEN_TO_SHOW, Screen, WIFI_COUNT, run_the_display,
 };
+use core::cell::RefCell;
 use core::fmt::Write;
 use core::str::from_utf8;
+use cyw43::JoinOptions;
 use cyw43_driver::setup_cyw43;
 use defmt::info;
 use defmt::*;
+use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
 use embassy_executor::Spawner;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
 use embassy_net::{Stack, StackResources};
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::flash::Async;
-use embassy_rp::gpio;
 use embassy_rp::gpio::Input;
-use embassy_rp::peripherals::SPI0;
+use embassy_rp::i2c::I2c;
+use embassy_rp::peripherals::{I2C0, SPI0};
 use embassy_rp::rtc::{DateTime, DayOfWeek};
 use embassy_rp::spi::Spi;
 use embassy_rp::spi::{self};
+use embassy_rp::{gpio, i2c};
+use embassy_sync::blocking_mutex::NoopMutex;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
@@ -36,7 +42,7 @@ use helpers::easy_format;
 use rand::RngCore;
 use reqwless::client::{HttpClient, TlsConfig, TlsVerify};
 use reqwless::request::Method;
-use save::{read_postcard_from_flash, save_postcard_to_flash, Save};
+use save::{Save, read_postcard_from_flash, save_postcard_to_flash};
 use serde::Deserialize;
 use static_cell::StaticCell;
 use temp_sensor::run_the_temp_sensor;
@@ -50,6 +56,7 @@ mod save;
 mod temp_sensor;
 
 type Spi0Bus = Mutex<NoopRawMutex, Spi<'static, SPI0, spi::Async>>;
+type I2c0Bus = NoopMutex<RefCell<I2c<'static, I2C0, i2c::Blocking>>>;
 
 const BSSID_LEN: usize = 1_000;
 const ADDR_OFFSET: u32 = 0x100000;
@@ -64,7 +71,7 @@ async fn main(spawner: Spawner) {
     user_led.set_high();
 
     let (net_device, mut control) = setup_cyw43(
-        p.PIO0, p.PIN_23, p.PIN_24, p.PIN_25, p.PIN_29, p.DMA_CH0, spawner,
+        *p.PIO0, *p.PIN_23, *p.PIN_24, *p.PIN_25, *p.PIN_29, *p.DMA_CH0, spawner,
     )
     .await;
 
@@ -115,18 +122,24 @@ async fn main(spawner: Spawner) {
     let seed = rng.next_u64();
 
     // Init network stack
-    static STACK: StaticCell<Stack<cyw43::NetDriver<'static>>> = StaticCell::new();
+    static STACK: StaticCell<Stack> = StaticCell::new();
     static RESOURCES: StaticCell<StackResources<5>> = StaticCell::new();
-    let stack = &*STACK.init(Stack::new(
+    let (stack, runner) = embassy_net::new(
         net_device,
         config,
-        RESOURCES.init(StackResources::<5>::new()),
+        RESOURCES.init(StackResources::new()),
         seed,
-    ));
+    );
+    // let stack = &*STACK.init(Stack::new(
+    //     net_device,
+    //     config,
+    //     RESOURCES.init(StackResources::<5>::new()),
+    //     seed,
+    // ));
     //rtc setup
     let mut rtc = embassy_rp::rtc::Rtc::new(p.RTC);
 
-    spawner.must_spawn(net_task(stack));
+    spawner.spawn(net_task(runner));
     //Attempt to connect to wifi to get RTC time loop for 2 minutes
     let mut wifi_connection_attempts = 0;
     let mut connected_to_wifi = false;
@@ -134,7 +147,10 @@ async fn main(spawner: Spawner) {
     let wifi_ssid = env_value("WIFI_SSID");
     let wifi_password = env_value("WIFI_PASSWORD");
     while wifi_connection_attempts < 30 {
-        match control.join_wpa2(wifi_ssid, &wifi_password).await {
+        match control
+            .join(wifi_ssid, JoinOptions::new(wifi_password.as_bytes()))
+            .await
+        {
             Ok(_) => {
                 connected_to_wifi = true;
                 info!("join successful");
@@ -261,8 +277,17 @@ async fn main(spawner: Spawner) {
     let mut flash = embassy_rp::flash::Flash::<_, Async, FLASH_SIZE>::new(p.FLASH, p.DMA_CH3);
     let mut save: Save = read_postcard_from_flash(ADDR_OFFSET, &mut flash, SAVE_OFFSET).unwrap();
     WIFI_COUNT.store(save.wifi_counted, core::sync::atomic::Ordering::Relaxed);
+
+    //Setup i2c bus
+    let config = embassy_rp::i2c::Config::default();
+    let mut i2c = i2c::I2c::new_blocking(p.I2C0, p.PIN_5, p.PIN_4, config);
+    static I2C_BUS: StaticCell<I2c0Bus> = StaticCell::new();
+    // static I2C_BUS: StaticCell<I2c0Bus> = StaticCell::new();
+    let i2c_bus = NoopMutex::new(RefCell::new(i2c));
+    let i2c_bus = I2C_BUS.init(i2c_bus);
+
     //Task spawning
-    spawner.must_spawn(run_the_temp_sensor(p.I2C0, p.PIN_5, p.PIN_4));
+    spawner.must_spawn(run_the_temp_sensor(i2c_bus));
     spawner.must_spawn(run_the_display(spi_bus, cs, dc, busy, reset));
 
     //Input loop
@@ -425,8 +450,8 @@ fn set_display_time(time: DateTime) {
 }
 
 #[embassy_executor::task]
-async fn net_task(stack: &'static Stack<cyw43::NetDriver<'static>>) -> ! {
-    stack.run().await
+async fn net_task(mut runner: embassy_net::Runner<'static, cyw43::NetDriver<'static>>) -> ! {
+    runner.run().await
 }
 
 #[derive(Deserialize)]

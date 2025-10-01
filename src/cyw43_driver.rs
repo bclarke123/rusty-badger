@@ -1,5 +1,5 @@
 use cyw43::Control;
-use cyw43_pio::PioSpi;
+use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
 use defmt::unwrap;
 use embassy_executor::Spawner;
 use embassy_net_wiznet::Device;
@@ -41,10 +41,19 @@ pub async fn setup_cyw43<'a>(
     // let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 224190) };
     // let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
 
-    let pwr = Output::new(p_23, Level::Low);
-    let cs = Output::new(p_25, Level::High);
-    let mut pio = Pio::new(pio0, Irqs);
-    let spi = PioSpi::new(&mut pio.common, pio.sm0, pio.irq0, cs, p_24, p_29, dma_ch0);
+    let pwr = Output::new(*p_23, Level::Low);
+    let cs = Output::new(*p_25, Level::High);
+    let mut pio = Pio::new(*pio0, Irqs);
+    let spi = PioSpi::new(
+        &mut pio.common,
+        pio.sm0,
+        DEFAULT_CLOCK_DIVIDER,
+        *pio.irq0,
+        *cs,
+        *p_24,
+        *p_29,
+        *dma_ch0,
+    );
     // let input = Input::new(p_29, Pull::Up);
 
     static STATE: StaticCell<cyw43::State> = StaticCell::new();
