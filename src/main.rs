@@ -14,15 +14,13 @@ use core::cell::RefCell;
 use core::fmt::Write;
 use core::str::from_utf8;
 use cyw43::JoinOptions;
-// use cyw43_driver::setup_cyw43;
 use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
 use defmt::info;
 use defmt::*;
-use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
 use embassy_executor::Spawner;
+use embassy_net::StackResources;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
-use embassy_net::{Stack, StackResources};
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::flash::Async;
 use embassy_rp::gpio::Input;
@@ -41,7 +39,6 @@ use env::env_value;
 use gpio::{Level, Output, Pull};
 use heapless::{String, Vec};
 use helpers::easy_format;
-use rand::RngCore;
 use reqwless::client::{HttpClient, TlsConfig, TlsVerify};
 use reqwless::request::Method;
 use save::{Save, read_postcard_from_flash, save_postcard_to_flash};
@@ -95,16 +92,12 @@ async fn main(spawner: Spawner) {
     static STATE: StaticCell<cyw43::State> = StaticCell::new();
     let state = STATE.init(cyw43::State::new());
     let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
-    spawner.spawn(cyw43_task(runner));
+    spawner.must_spawn(cyw43_task(runner));
 
     control.init(clm).await;
     control
         .set_power_management(cyw43::PowerManagementMode::PowerSave)
         .await;
-    // let (net_device, mut control) = setup_cyw43(
-    //     p.PIO0, p.PIN_23, p.PIN_24, p.PIN_25, p.PIN_29, p.DMA_CH0, spawner,
-    // )
-    // .await;
 
     let miso = p.PIN_16;
     let mosi = p.PIN_19;
@@ -153,7 +146,6 @@ async fn main(spawner: Spawner) {
     let seed = rng.next_u64();
 
     // Init network stack
-    static STACK: StaticCell<Stack> = StaticCell::new();
     static RESOURCES: StaticCell<StackResources<5>> = StaticCell::new();
     let (stack, runner) = embassy_net::new(
         net_device,
@@ -161,16 +153,11 @@ async fn main(spawner: Spawner) {
         RESOURCES.init(StackResources::new()),
         seed,
     );
-    // let stack = &*STACK.init(Stack::new(
-    //     net_device,
-    //     config,
-    //     RESOURCES.init(StackResources::<5>::new()),
-    //     seed,
-    // ));
+
     //rtc setup
     let mut rtc = embassy_rp::rtc::Rtc::new(p.RTC);
 
-    spawner.spawn(net_task(runner));
+    spawner.must_spawn(net_task(runner));
     //Attempt to connect to wifi to get RTC time loop for 2 minutes
     let mut wifi_connection_attempts = 0;
     let mut connected_to_wifi = false;
@@ -311,9 +298,8 @@ async fn main(spawner: Spawner) {
 
     //Setup i2c bus
     let config = embassy_rp::i2c::Config::default();
-    let mut i2c = i2c::I2c::new_blocking(p.I2C0, p.PIN_5, p.PIN_4, config);
+    let i2c = i2c::I2c::new_blocking(p.I2C0, p.PIN_5, p.PIN_4, config);
     static I2C_BUS: StaticCell<I2c0Bus> = StaticCell::new();
-    // static I2C_BUS: StaticCell<I2c0Bus> = StaticCell::new();
     let i2c_bus = NoopMutex::new(RefCell::new(i2c));
     let i2c_bus = I2C_BUS.init(i2c_bus);
 
