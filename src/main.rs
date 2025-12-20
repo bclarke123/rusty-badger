@@ -334,7 +334,7 @@ async fn main(spawner: Spawner) {
     WIFI_COUNT.store(save.wifi_counted, core::sync::atomic::Ordering::Relaxed);
 
     //Task spawning
-    spawner.must_spawn(run_the_temp_sensor(i2c_bus));
+    // spawner.must_spawn(run_the_temp_sensor(i2c_bus));
     spawner.must_spawn(run_the_display(spi_bus, cs, dc, busy, reset));
 
     //Input loop
@@ -345,7 +345,7 @@ async fn main(spawner: Spawner) {
     let reset_cycle = 3_000;
 
     //Turn off led to signify that the badge is ready
-    // user_led.set_low();
+    user_led.set_low();
 
     //RTC alarm stuff
     let mut go_to_sleep = false;
