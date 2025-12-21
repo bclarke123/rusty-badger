@@ -9,7 +9,11 @@ use reqwless::request::Method;
 #[derive(Format)]
 pub struct HttpError;
 
-pub async fn http_get<'a>(stack: &Stack<'a>, url: &str, buf: &mut [u8]) -> Result<(), HttpError> {
+pub async fn http_get<'a, 'b>(
+    stack: &Stack<'a>,
+    url: &str,
+    buf: &'b mut [u8],
+) -> Result<&'b [u8], HttpError> {
     let seed = RoscRng.next_u64();
 
     let mut tls_read_buffer = [0; 16640];
@@ -49,7 +53,7 @@ pub async fn http_get<'a>(stack: &Stack<'a>, url: &str, buf: &mut [u8]) -> Resul
     let body_bytes = response.body().read_to_end().await;
 
     match body_bytes {
-        Ok(_) => Ok(()),
+        Ok(bytes) => Ok(bytes),
         Err(e) => {
             error!("Failed to read HTTP response body: {:?}", e);
             Err(HttpError)

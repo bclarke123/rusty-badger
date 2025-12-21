@@ -164,13 +164,8 @@ async fn main(spawner: Spawner) {
     static SPI_BUS: StaticCell<Spi0Bus> = StaticCell::new();
     let spi_bus = SPI_BUS.init(Mutex::new(spi));
 
-    info!("led on!");
-    // control.gpio_set(0, true).await;
-
     //wifi setup
     let config = embassy_net::Config::dhcpv4(Default::default());
-
-    let seed = RoscRng.next_u64();
 
     // Init network stack
     static RESOURCES: StaticCell<StackResources<5>> = StaticCell::new();
@@ -178,7 +173,7 @@ async fn main(spawner: Spawner) {
         net_device,
         config,
         RESOURCES.init(StackResources::new()),
-        seed,
+        RoscRng.next_u64(),
     );
 
     //If the watch dog isn't fed, reboot to help with hang up
@@ -242,17 +237,21 @@ async fn main(spawner: Spawner) {
 
         //If the call goes through set the rtc
         match http_get(&stack, url, &mut rx_buffer).await {
-            Ok(_) => {
-                match serde_json_core::de::from_slice::<TimeApiResponse>(&rx_buffer) {
+            Ok(bytes) => {
+                match serde_json_core::de::from_slice::<TimeApiResponse>(bytes) {
                     Ok((output, _used)) => {
                         //Deadlines am i right?
                         rtc_device
                             .set_datetime(&output.into())
                             .expect("TODO: panic message");
+
+                        blink(&mut user_led, 4).await;
                     }
                     Err(_e) => {
                         error!("Failed to parse response body");
                         // return; // handle the error
+
+                        blink(&mut user_led, 1).await;
                     }
                 }
             }
@@ -284,11 +283,6 @@ async fn main(spawner: Spawner) {
     let mut time_to_scan = true;
     //5 minutes(ish) idk it's late and my math is so bad rn
     let reset_cycle = 3_000;
-
-    //Turn off led to signify that the badge is ready
-    // user_led.set_low();
-
-    blink(&mut user_led, 4).await;
 
     //RTC alarm stuff
     let mut go_to_sleep = false;
