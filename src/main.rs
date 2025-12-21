@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use crate::http::http_get;
 use crate::pcf85063a::Control;
 use badge_display::display_image::DisplayImage;
 use badge_display::{
@@ -9,7 +10,6 @@ use badge_display::{
 };
 use core::cell::RefCell;
 use core::fmt::Write;
-use core::str::from_utf8;
 use cyw43::JoinOptions;
 use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
 use defmt::info;
@@ -17,8 +17,6 @@ use defmt::*;
 use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
 use embassy_executor::Spawner;
 use embassy_net::StackResources;
-use embassy_net::dns::DnsSocket;
-use embassy_net::tcp::client::{TcpClient, TcpClientState};
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::flash::Async;
 use embassy_rp::gpio::Input;
@@ -39,8 +37,6 @@ use gpio::{Level, Output, Pull};
 use heapless::{String, Vec};
 use helpers::easy_format;
 use pcf85063a::PCF85063;
-use reqwless::client::{HttpClient, TlsConfig, TlsVerify};
-use reqwless::request::Method;
 use save::{Save, read_postcard_from_flash, save_postcard_to_flash};
 use serde::Deserialize;
 use static_cell::StaticCell;
@@ -50,6 +46,7 @@ use {defmt_rtt as _, panic_probe as _};
 mod badge_display;
 mod env;
 mod helpers;
+mod http;
 mod pcf85063a;
 mod save;
 mod temp_sensor;
@@ -184,7 +181,7 @@ async fn main(spawner: Spawner) {
         seed,
     );
 
-    //If the watch dog isn't fed in 60 seconds reboot to help with hang up
+    //If the watch dog isn't fed, reboot to help with hang up
     watchdog.start(Duration::from_secs(8));
 
     spawner.must_spawn(net_task(runner));
@@ -237,22 +234,6 @@ async fn main(spawner: Spawner) {
 
         //RTC Web request
         let mut rx_buffer = [0; 8192];
-        let mut tls_read_buffer = [0; 16640];
-        let mut tls_write_buffer = [0; 16640];
-        let client_state = TcpClientState::<1, 1024, 1024>::new();
-        let tcp_client = TcpClient::new(stack, &client_state);
-        let dns_client = DnsSocket::new(stack);
-        let tls_config = TlsConfig::new(
-            seed,
-            &mut tls_read_buffer,
-            &mut tls_write_buffer,
-            TlsVerify::None,
-        );
-
-        Timer::after(Duration::from_millis(500)).await;
-        // let mut http_client = HttpClient::new(&tcp_client, &dns_client);
-        let mut http_client = HttpClient::new_with_tls(&tcp_client, &dns_client, tls_config);
-
         let url = env_value("TIME_API");
         info!("connecting to {}", &url);
 
@@ -260,66 +241,13 @@ async fn main(spawner: Spawner) {
         watchdog.feed();
 
         //If the call goes through set the rtc
-        match http_client.request(Method::GET, &url).await {
-            Ok(mut request) => {
-                let response = match request.send(&mut rx_buffer).await {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        error!("Failed to send HTTP request: {:?}", e);
-                        // error!("Failed to send HTTP request");
-                        return; // handle the error;
-                    }
-                };
-
-                let body = match from_utf8(response.body().read_to_end().await.unwrap()) {
-                    Ok(b) => b,
-                    Err(_e) => {
-                        error!("Failed to read response body");
-                        return; // handle the error
-                    }
-                };
-                info!("Response body: {:?}", &body);
-
-                let bytes = body.as_bytes();
-                match serde_json_core::de::from_slice::<TimeApiResponse>(bytes) {
+        match http_get(&stack, url, &mut rx_buffer).await {
+            Ok(_) => {
+                match serde_json_core::de::from_slice::<TimeApiResponse>(&rx_buffer) {
                     Ok((output, _used)) => {
                         //Deadlines am i right?
-                        info!("Datetime: {:?}", output.datetime);
-                        //split at T
-                        let datetime = output.datetime.split('T').collect::<Vec<&str, 2>>();
-                        //split at -
-                        let date = datetime[0].split('-').collect::<Vec<&str, 3>>();
-                        let year = date[0].parse::<u16>().unwrap();
-                        let month = date[1].parse::<u8>().unwrap();
-                        let day = date[2].parse::<u8>().unwrap();
-                        //split at :
-                        let time = datetime[1].split(':').collect::<Vec<&str, 4>>();
-                        let hour = time[0].parse::<u8>().unwrap();
-                        let minute = time[1].parse::<u8>().unwrap();
-                        //split at .
-                        let second_split = time[2].split('.').collect::<Vec<&str, 2>>();
-                        let second = second_split[0].parse::<f64>().unwrap();
-                        let rtc_time = DateTime {
-                            year: year,
-                            month: month,
-                            day: day,
-                            day_of_week: match output.day_of_week {
-                                0 => DayOfWeek::Sunday,
-                                1 => DayOfWeek::Monday,
-                                2 => DayOfWeek::Tuesday,
-                                3 => DayOfWeek::Wednesday,
-                                4 => DayOfWeek::Thursday,
-                                5 => DayOfWeek::Friday,
-                                6 => DayOfWeek::Saturday,
-                                _ => DayOfWeek::Sunday,
-                            },
-                            hour,
-                            minute,
-                            second: second as u8,
-                        };
-
                         rtc_device
-                            .set_datetime(&rtc_time)
+                            .set_datetime(&output.into())
                             .expect("TODO: panic message");
                     }
                     Err(_e) => {
@@ -574,6 +502,46 @@ async fn cyw43_task(
 struct TimeApiResponse<'a> {
     datetime: &'a str,
     day_of_week: u8,
+}
+
+impl<'a> From<TimeApiResponse<'a>> for DateTime {
+    fn from(response: TimeApiResponse) -> Self {
+        info!("Datetime: {:?}", response.datetime);
+        //split at T
+        let datetime = response.datetime.split('T').collect::<Vec<&str, 2>>();
+        //split at -
+        let date = datetime[0].split('-').collect::<Vec<&str, 3>>();
+        let year = date[0].parse::<u16>().unwrap();
+        let month = date[1].parse::<u8>().unwrap();
+        let day = date[2].parse::<u8>().unwrap();
+        //split at :
+        let time = datetime[1].split(':').collect::<Vec<&str, 4>>();
+        let hour = time[0].parse::<u8>().unwrap();
+        let minute = time[1].parse::<u8>().unwrap();
+        //split at .
+        let second_split = time[2].split('.').collect::<Vec<&str, 2>>();
+        let second = second_split[0].parse::<f64>().unwrap();
+        let rtc_time = DateTime {
+            year: year,
+            month: month,
+            day: day,
+            day_of_week: match response.day_of_week {
+                0 => DayOfWeek::Sunday,
+                1 => DayOfWeek::Monday,
+                2 => DayOfWeek::Tuesday,
+                3 => DayOfWeek::Wednesday,
+                4 => DayOfWeek::Thursday,
+                5 => DayOfWeek::Friday,
+                6 => DayOfWeek::Saturday,
+                _ => DayOfWeek::Sunday,
+            },
+            hour,
+            minute,
+            second: second as u8,
+        };
+
+        rtc_time
+    }
 }
 
 fn process_bssid(bssid: [u8; 6], wifi_counted: &mut u32, bssids: &mut Vec<String<17>, BSSID_LEN>) {
