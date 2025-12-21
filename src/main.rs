@@ -44,7 +44,6 @@ use reqwless::request::Method;
 use save::{Save, read_postcard_from_flash, save_postcard_to_flash};
 use serde::Deserialize;
 use static_cell::StaticCell;
-use temp_sensor::run_the_temp_sensor;
 use time::PrimitiveDateTime;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -68,11 +67,21 @@ bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
 
+async fn blink(pin: &mut Output<'_>, n_times: usize) {
+    for _ in 0..n_times {
+        pin.set_high();
+        Timer::after_millis(100).await;
+        pin.set_low();
+        Timer::after_millis(100).await;
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
     let mut user_led = Output::new(p.PIN_22, Level::High);
-    user_led.set_high();
+
+    blink(&mut user_led, 1).await;
 
     //Wifi driver and cyw43 setup
     let fw = include_bytes!("../cyw43-firmware/43439A0.bin");
@@ -126,6 +135,8 @@ async fn main(spawner: Spawner) {
     let rtc_alarm = Input::new(p.PIN_8, Pull::Down);
     let mut watchdog = Watchdog::new(p.WATCHDOG);
 
+    blink(&mut user_led, 2).await;
+
     //Setup i2c bus
     let config = embassy_rp::i2c::Config::default();
     let i2c = i2c::I2c::new_blocking(p.I2C0, p.PIN_5, p.PIN_4, config);
@@ -160,10 +171,9 @@ async fn main(spawner: Spawner) {
     // control.gpio_set(0, true).await;
 
     //wifi setup
-    let mut rng = RoscRng;
-
     let config = embassy_net::Config::dhcpv4(Default::default());
-    let seed = rng.next_u64();
+
+    let seed = RoscRng.next_u64();
 
     // Init network stack
     static RESOURCES: StaticCell<StackResources<5>> = StaticCell::new();
@@ -193,6 +203,9 @@ async fn main(spawner: Spawner) {
             Ok(_) => {
                 connected_to_wifi = true;
                 info!("join successful");
+
+                blink(&mut user_led, 3).await;
+
                 break;
             }
             Err(err) => {
@@ -345,7 +358,9 @@ async fn main(spawner: Spawner) {
     let reset_cycle = 3_000;
 
     //Turn off led to signify that the badge is ready
-    user_led.set_low();
+    // user_led.set_low();
+
+    blink(&mut user_led, 4).await;
 
     //RTC alarm stuff
     let mut go_to_sleep = false;
