@@ -134,8 +134,6 @@ async fn main(spawner: Spawner) {
     let rtc_alarm = Input::new(p.PIN_8, Pull::Down);
     let mut watchdog = Watchdog::new(p.WATCHDOG);
 
-    blink(&mut user_led, 2).await;
-
     //Setup i2c bus
     let config = embassy_rp::i2c::Config::default();
     let i2c = i2c::I2c::new_blocking(p.I2C0, p.PIN_5, p.PIN_4, config);
@@ -165,6 +163,8 @@ async fn main(spawner: Spawner) {
     //SPI Bus setup to run the e-ink display
     static SPI_BUS: StaticCell<Spi0Bus> = StaticCell::new();
     let spi_bus = SPI_BUS.init(Mutex::new(spi));
+
+    blink(&mut user_led, 2).await;
 
     //wifi setup
     let config = embassy_net::Config::dhcpv4(Default::default());
