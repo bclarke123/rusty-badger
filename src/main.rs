@@ -22,7 +22,7 @@ use embassy_rp::flash::Async;
 use embassy_rp::gpio::Input;
 use embassy_rp::i2c::I2c;
 use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0, SPI0};
-use embassy_rp::pio::{InterruptHandler, Pio};
+use embassy_rp::pio::Pio;
 use embassy_rp::rtc::{DateTime, DayOfWeek};
 use embassy_rp::spi::Spi;
 use embassy_rp::spi::{self};
@@ -54,7 +54,7 @@ mod save;
 mod temp_sensor;
 
 type Spi0Bus = Mutex<NoopRawMutex, Spi<'static, SPI0, spi::Async>>;
-type I2c0Bus = NoopMutex<RefCell<I2c<'static, I2C0, i2c::Blocking>>>;
+type I2c0Bus = NoopMutex<RefCell<I2c<'static, I2C0, i2c::Async>>>;
 
 const BSSID_LEN: usize = 1_000;
 const ADDR_OFFSET: u32 = 0x100000;
@@ -63,7 +63,8 @@ const SAVE_OFFSET: u32 = 0x00;
 const FLASH_SIZE: usize = 2 * 1024 * 1024;
 
 bind_interrupts!(struct Irqs {
-    PIO0_IRQ_0 => InterruptHandler<PIO0>;
+    PIO0_IRQ_0 => embassy_rp::pio::InterruptHandler<embassy_rp::peripherals::PIO0>;
+    I2C0_IRQ => embassy_rp::i2c::InterruptHandler<embassy_rp::peripherals::I2C0>;
 });
 
 async fn blink(pin: &mut Output<'_>, n_times: usize) {
@@ -138,7 +139,7 @@ async fn main(spawner: Spawner) {
 
     //Setup i2c bus
     let config = embassy_rp::i2c::Config::default();
-    let i2c = i2c::I2c::new_blocking(p.I2C0, p.PIN_5, p.PIN_4, config);
+    let i2c = i2c::I2c::new_async(p.I2C0, p.PIN_5, p.PIN_4, Irqs, config);
     static I2C_BUS: StaticCell<I2c0Bus> = StaticCell::new();
     let i2c_bus = NoopMutex::new(RefCell::new(i2c));
     let i2c_bus = I2C_BUS.init(i2c_bus);
