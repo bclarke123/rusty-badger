@@ -4,8 +4,8 @@
 use crate::http::http_get;
 use badge_display::display_image::DisplayImage;
 use badge_display::{
-    CHANGE_IMAGE, CURRENT_IMAGE, DISPLAY_CHANGED, RECENT_WIFI_NETWORKS, RTC_TIME_STRING,
-    RecentWifiNetworksVec, SCREEN_TO_SHOW, Screen, WIFI_COUNT, run_the_display,
+    CURRENT_IMAGE, DISPLAY_CHANGED, RECENT_WIFI_NETWORKS, RTC_TIME_STRING, RecentWifiNetworksVec,
+    Screen, WIFI_COUNT, run_the_display,
 };
 use core::fmt::Write;
 use cyw43::{JoinOptions, PowerManagementMode};
@@ -267,7 +267,7 @@ async fn main(spawner: Spawner) {
         });
     WIFI_COUNT.store(save.wifi_counted, core::sync::atomic::Ordering::Relaxed);
 
-    DISPLAY_CHANGED.signal(());
+    DISPLAY_CHANGED.signal(Screen::Badge);
     spawner.must_spawn(run_the_display(spi_bus, cs, dc, busy, reset));
 
     //Input loop
@@ -304,7 +304,7 @@ async fn main(spawner: Spawner) {
             let current_image = CURRENT_IMAGE.load(core::sync::atomic::Ordering::Relaxed);
             let new_image = DisplayImage::from_u8(current_image).unwrap().next();
             CURRENT_IMAGE.store(new_image.as_u8(), core::sync::atomic::Ordering::Relaxed);
-            CHANGE_IMAGE.store(true, core::sync::atomic::Ordering::Relaxed);
+            DISPLAY_CHANGED.signal(Screen::Badge);
             Timer::after(Duration::from_millis(500)).await;
             continue;
         }
@@ -321,13 +321,8 @@ async fn main(spawner: Spawner) {
         if btn_down.is_high() {
             info!("Button Down pressed");
             reset_cycles_till_sleep = 0;
-            SCREEN_TO_SHOW.lock(|screen| {
-                if !matches!(*screen.borrow(), Screen::WifiList) {
-                    DISPLAY_CHANGED.signal(());
-                }
 
-                screen.replace(Screen::WifiList);
-            });
+            DISPLAY_CHANGED.signal(Screen::WifiList);
 
             Timer::after(Duration::from_millis(500)).await;
             continue;
@@ -336,13 +331,9 @@ async fn main(spawner: Spawner) {
         if btn_up.is_high() {
             info!("Button Up pressed");
             reset_cycles_till_sleep = 0;
-            SCREEN_TO_SHOW.lock(|screen| {
-                if !matches!(*screen.borrow(), Screen::Badge) {
-                    DISPLAY_CHANGED.signal(());
-                }
 
-                screen.replace(Screen::Badge);
-            });
+            DISPLAY_CHANGED.signal(Screen::Badge);
+
             Timer::after(Duration::from_millis(500)).await;
             continue;
         }
@@ -350,15 +341,8 @@ async fn main(spawner: Spawner) {
         if btn_b.is_high() {
             info!("Button B pressed");
             reset_cycles_till_sleep = 0;
-            SCREEN_TO_SHOW.lock(|screen| {
-                if *screen.borrow() == Screen::Badge {
-                    //IF on badge screen and b pressed reset wifi count
-                    save.wifi_counted = 0;
-                    save.bssid.clear();
-                    WIFI_COUNT.store(0, core::sync::atomic::Ordering::Relaxed);
-                    current_cycle = 0;
-                }
-            });
+
+            DISPLAY_CHANGED.signal(Screen::Badge);
 
             let mut recent_networks = RecentWifiNetworksVec::new();
             let mut scanner = control.scan(Default::default()).await;
