@@ -100,6 +100,7 @@ tinybmp = "0.5.0"
 postcard = "1.0.8"
 time = { version = "0.3.17", default-features = false }
 pcf85063a = "0.1.1"
+embassy-futures = "0.1.2"
 
 [profile.release]
 lto = true

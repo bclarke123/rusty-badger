@@ -2,40 +2,47 @@ pub mod display_image;
 
 use core::{
     cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicU32, AtomicU8},
+    sync::atomic::{AtomicBool, AtomicU8, AtomicU32},
 };
 use defmt::*;
 use display_image::get_current_image;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
+use embassy_futures::select::select;
 use embassy_rp::gpio;
 use embassy_rp::gpio::Input;
-use embassy_sync::blocking_mutex::{self, raw::CriticalSectionRawMutex};
+use embassy_sync::{
+    blocking_mutex::{
+        self,
+        raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
+    },
+    signal::Signal,
+};
 use embassy_time::{Delay, Duration, Timer};
 use embedded_graphics::{
     image::Image,
-    mono_font::{ascii::*, MonoTextStyle},
+    mono_font::{MonoTextStyle, ascii::*},
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{PrimitiveStyle, PrimitiveStyleBuilder, Rectangle},
     text::Text,
 };
 use embedded_text::{
+    TextBox,
     alignment::HorizontalAlignment,
     style::{HeightMode, TextBoxStyleBuilder},
-    TextBox,
 };
 use gpio::Output;
 use heapless::{String, Vec};
 use tinybmp::Bmp;
 use uc8151::LUT;
 use uc8151::WIDTH;
-use uc8151::{asynch::Uc8151, HEIGHT};
+use uc8151::{HEIGHT, asynch::Uc8151};
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::{
+    Spi0Bus,
     env::env_value,
     helpers::{easy_format, easy_format_str},
-    Spi0Bus,
 };
 
 pub type RecentWifiNetworksVec = Vec<String<32>, 4>;
@@ -48,8 +55,7 @@ pub static RECENT_WIFI_NETWORKS: blocking_mutex::Mutex<
     RefCell<RecentWifiNetworksVec>,
 > = blocking_mutex::Mutex::new(RefCell::new(RecentWifiNetworksVec::new()));
 
-pub static FORCE_SCREEN_REFRESH: AtomicBool = AtomicBool::new(true);
-pub static DISPLAY_CHANGED: AtomicBool = AtomicBool::new(false);
+pub static DISPLAY_CHANGED: Signal<ThreadModeRawMutex, ()> = Signal::new();
 pub static CURRENT_IMAGE: AtomicU8 = AtomicU8::new(0);
 pub static CHANGE_IMAGE: AtomicBool = AtomicBool::new(true);
 pub static WIFI_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -73,13 +79,7 @@ pub async fn run_the_display(
     reset: Output<'static>,
 ) {
     let spi_dev = SpiDevice::new(&spi_bus, cs);
-
     let mut display = Uc8151::new(spi_dev, dc, busy, reset, Delay);
-
-    display.reset().await;
-
-    // Initialise display with speed
-    let _ = display.setup(LUT::Medium).await;
 
     // Note we're setting the Text color to `Off`. The driver is set up to treat Off as Black so that BMPs work as expected.
     let character_style = MonoTextStyle::new(&FONT_9X18_BOLD, BinaryColor::Off);
@@ -110,29 +110,17 @@ pub async fn run_the_display(
         textbox_style,
     );
 
-    // let _ = display.update().await;
-
-    //Each cycle is half a second
-    let cycle: Duration = Duration::from_millis(500);
-
-    //New start every 120 cycles or 60 seconds
-    let cycles_to_clear_at: i32 = 120;
-    let mut cycles_since_last_clear = 0;
     let mut current_screen = Screen::Badge;
+
     loop {
-        let mut force_screen_refresh =
-            FORCE_SCREEN_REFRESH.load(core::sync::atomic::Ordering::Relaxed);
-        //Timed based display events
-        if DISPLAY_CHANGED.load(core::sync::atomic::Ordering::Relaxed) {
-            let clear_rectangle = Rectangle::new(Point::new(0, 0), Size::new(WIDTH, HEIGHT));
-            clear_rectangle
-                .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
-                .draw(&mut display)
-                .unwrap();
-            let _ = display.update().await;
-            DISPLAY_CHANGED.store(false, core::sync::atomic::Ordering::Relaxed);
-            force_screen_refresh = true;
-        }
+        select(Timer::after_secs(60), DISPLAY_CHANGED.wait()).await;
+
+        display.enable();
+        display.reset().await;
+        let _ = display.setup(LUT::Medium).await;
+        Timer::after_millis(50).await;
+
+        let force_screen_refresh = true;
 
         SCREEN_TO_SHOW.lock(|x| current_screen = *x.borrow());
         // info!("Current Screen: {:?}", current_screen);
@@ -142,86 +130,79 @@ pub async fn run_the_display(
                 name_and_detail_box.draw(&mut display).unwrap();
             }
 
-            //Updates the top bar
-            //Runs every 60 cycles/30 seconds and first run
-            if cycles_since_last_clear % 60 == 0 || force_screen_refresh {
-                let count = WIFI_COUNT.load(core::sync::atomic::Ordering::Relaxed);
-                info!("Wifi count: {}", count);
-                let temp = TEMP.load(core::sync::atomic::Ordering::Relaxed);
-                let humidity = HUMIDITY.load(core::sync::atomic::Ordering::Relaxed);
-                let top_text: String<64> = easy_format::<64>(format_args!(
-                    "{}F {}% Wifi found: {}",
-                    temp, humidity, count
-                ));
-                let top_bounds = Rectangle::new(Point::new(0, 0), Size::new(WIDTH, 24));
-                top_bounds
-                    .into_styled(
-                        PrimitiveStyleBuilder::default()
-                            .stroke_color(BinaryColor::Off)
-                            .fill_color(BinaryColor::On)
-                            .stroke_width(1)
-                            .build(),
-                    )
-                    .draw(&mut display)
-                    .unwrap();
-
-                Text::new(top_text.as_str(), Point::new(8, 16), character_style)
-                    .draw(&mut display)
-                    .unwrap();
-
-                // Draw the text box.
-                let result = display.partial_update(top_bounds.try_into().unwrap()).await;
-                match result {
-                    Ok(_) => {}
-                    Err(_) => {
-                        info!("Error updating display");
-                    }
-                }
-            }
-
-            //Runs every 120 cycles/60 seconds and first run
-            if cycles_since_last_clear == 0 || force_screen_refresh {
-                let mut time_text: String<8> = String::<8>::new();
-
-                let time_box_rectangle_location = Point::new(0, 96);
-                RTC_TIME_STRING.lock(|x| {
-                    time_text.push_str(x.borrow().as_str()).unwrap();
-                });
-
-                //The bounds of the box for time and refresh area
-                let time_bounds = Rectangle::new(time_box_rectangle_location, Size::new(88, 24));
-                time_bounds
-                    .into_styled(
-                        PrimitiveStyleBuilder::default()
-                            .stroke_color(BinaryColor::Off)
-                            .fill_color(BinaryColor::On)
-                            .stroke_width(1)
-                            .build(),
-                    )
-                    .draw(&mut display)
-                    .unwrap();
-
-                //Adding a y offset to the box location to fit inside the box
-                Text::new(
-                    time_text.as_str(),
-                    (
-                        time_box_rectangle_location.x + 8,
-                        time_box_rectangle_location.y + 16,
-                    )
-                        .into(),
-                    character_style,
+            let count = WIFI_COUNT.load(core::sync::atomic::Ordering::Relaxed);
+            info!("Wifi count: {}", count);
+            let temp = TEMP.load(core::sync::atomic::Ordering::Relaxed);
+            let humidity = HUMIDITY.load(core::sync::atomic::Ordering::Relaxed);
+            let top_text: String<64> = easy_format::<64>(format_args!(
+                "{}F {}% Wifi found: {}",
+                temp, humidity, count
+            ));
+            let top_bounds = Rectangle::new(Point::new(0, 0), Size::new(WIDTH, 24));
+            top_bounds
+                .into_styled(
+                    PrimitiveStyleBuilder::default()
+                        .stroke_color(BinaryColor::Off)
+                        .fill_color(BinaryColor::On)
+                        .stroke_width(1)
+                        .build(),
                 )
                 .draw(&mut display)
                 .unwrap();
 
-                let result = display
-                    .partial_update(time_bounds.try_into().unwrap())
-                    .await;
-                match result {
-                    Ok(_) => {}
-                    Err(_) => {
-                        info!("Error updating display");
-                    }
+            Text::new(top_text.as_str(), Point::new(8, 16), character_style)
+                .draw(&mut display)
+                .unwrap();
+
+            // Draw the text box.
+            let result = display.partial_update(top_bounds.try_into().unwrap()).await;
+            match result {
+                Ok(_) => {}
+                Err(_) => {
+                    info!("Error updating display");
+                }
+            }
+
+            let mut time_text: String<8> = String::<8>::new();
+
+            let time_box_rectangle_location = Point::new(0, 96);
+            RTC_TIME_STRING.lock(|x| {
+                time_text.push_str(x.borrow().as_str()).unwrap();
+            });
+
+            //The bounds of the box for time and refresh area
+            let time_bounds = Rectangle::new(time_box_rectangle_location, Size::new(88, 24));
+            time_bounds
+                .into_styled(
+                    PrimitiveStyleBuilder::default()
+                        .stroke_color(BinaryColor::Off)
+                        .fill_color(BinaryColor::On)
+                        .stroke_width(1)
+                        .build(),
+                )
+                .draw(&mut display)
+                .unwrap();
+
+            //Adding a y offset to the box location to fit inside the box
+            Text::new(
+                time_text.as_str(),
+                (
+                    time_box_rectangle_location.x + 8,
+                    time_box_rectangle_location.y + 16,
+                )
+                    .into(),
+                character_style,
+            )
+            .draw(&mut display)
+            .unwrap();
+
+            let result = display
+                .partial_update(time_bounds.try_into().unwrap())
+                .await;
+            match result {
+                Ok(_) => {}
+                Err(_) => {
+                    info!("Error updating display");
                 }
             }
 
@@ -312,12 +293,6 @@ pub async fn run_the_display(
             }
         }
 
-        cycles_since_last_clear += 1;
-        if cycles_since_last_clear >= cycles_to_clear_at {
-            cycles_since_last_clear = 0;
-        }
-        FORCE_SCREEN_REFRESH.store(false, core::sync::atomic::Ordering::Relaxed);
-        // info!("Display Cycle: {}", cycles_since_last_clear);
-        Timer::after(cycle).await;
+        display.disable();
     }
 }

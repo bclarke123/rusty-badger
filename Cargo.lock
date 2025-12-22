@@ -2074,6 +2074,7 @@ dependencies = [
  "defmt-rtt",
  "embassy-embedded-hal",
  "embassy-executor",
+ "embassy-futures",
  "embassy-net",
  "embassy-net-wiznet",
  "embassy-rp",

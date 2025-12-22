@@ -4,11 +4,11 @@
 use crate::http::http_get;
 use badge_display::display_image::DisplayImage;
 use badge_display::{
-    CHANGE_IMAGE, CURRENT_IMAGE, DISPLAY_CHANGED, FORCE_SCREEN_REFRESH, RECENT_WIFI_NETWORKS,
-    RTC_TIME_STRING, RecentWifiNetworksVec, SCREEN_TO_SHOW, Screen, WIFI_COUNT, run_the_display,
+    CHANGE_IMAGE, CURRENT_IMAGE, DISPLAY_CHANGED, RECENT_WIFI_NETWORKS, RTC_TIME_STRING,
+    RecentWifiNetworksVec, SCREEN_TO_SHOW, Screen, WIFI_COUNT, run_the_display,
 };
 use core::fmt::Write;
-use cyw43::JoinOptions;
+use cyw43::{JoinOptions, PowerManagementMode};
 use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
 use defmt::info;
 use defmt::*;
@@ -71,6 +71,10 @@ async fn blink(pin: &mut Output<'_>, n_times: usize) {
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
+
+    let mut power_latch = Output::new(p.PIN_10, Level::High);
+    power_latch.set_high();
+
     let mut user_led = Output::new(p.PIN_22, Level::High);
 
     blink(&mut user_led, 1).await;
@@ -108,12 +112,7 @@ async fn main(spawner: Spawner) {
     let dc = p.PIN_20;
     let cs = p.PIN_17;
     let busy = p.PIN_26;
-    let reset = p.PIN_21;
-    let power = p.PIN_10;
-
-    let reset = Output::new(reset, Level::Low);
-    let mut power = Output::new(power, Level::Low);
-    power.set_high();
+    let reset = Output::new(p.PIN_21, Level::Low);
 
     let dc = Output::new(dc, Level::Low);
     let cs = Output::new(cs, Level::High);
@@ -268,6 +267,7 @@ async fn main(spawner: Spawner) {
         });
     WIFI_COUNT.store(save.wifi_counted, core::sync::atomic::Ordering::Relaxed);
 
+    DISPLAY_CHANGED.signal(());
     spawner.must_spawn(run_the_display(spi_bus, cs, dc, busy, reset));
 
     //Input loop
@@ -322,9 +322,13 @@ async fn main(spawner: Spawner) {
             info!("Button Down pressed");
             reset_cycles_till_sleep = 0;
             SCREEN_TO_SHOW.lock(|screen| {
+                if !matches!(*screen.borrow(), Screen::WifiList) {
+                    DISPLAY_CHANGED.signal(());
+                }
+
                 screen.replace(Screen::WifiList);
             });
-            DISPLAY_CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
+
             Timer::after(Duration::from_millis(500)).await;
             continue;
         }
@@ -333,9 +337,12 @@ async fn main(spawner: Spawner) {
             info!("Button Up pressed");
             reset_cycles_till_sleep = 0;
             SCREEN_TO_SHOW.lock(|screen| {
+                if !matches!(*screen.borrow(), Screen::Badge) {
+                    DISPLAY_CHANGED.signal(());
+                }
+
                 screen.replace(Screen::Badge);
             });
-            DISPLAY_CHANGED.store(true, core::sync::atomic::Ordering::Relaxed);
             Timer::after(Duration::from_millis(500)).await;
             continue;
         }
@@ -383,7 +390,6 @@ async fn main(spawner: Spawner) {
                 recent_networks_vec.replace(recent_networks);
             });
 
-            FORCE_SCREEN_REFRESH.store(true, core::sync::atomic::Ordering::Relaxed);
             Timer::after(Duration::from_millis(500)).await;
 
             continue;
@@ -401,16 +407,28 @@ async fn main(spawner: Spawner) {
         };
 
         if time_to_scan {
+            control
+                .set_power_management(PowerManagementMode::None)
+                .await;
+
+            Timer::after(Duration::from_millis(100)).await;
             info!("Scanning for wifi networks");
             reset_cycles_till_sleep += 1;
             time_to_scan = false;
-            let mut scanner = control.scan(Default::default()).await;
-            while let Some(bss) = scanner.next().await {
-                process_bssid(bss.bssid, &mut save.wifi_counted, &mut save.bssid);
+
+            {
+                let mut scanner = control.scan(Default::default()).await;
+                while let Some(bss) = scanner.next().await {
+                    process_bssid(bss.bssid, &mut save.wifi_counted, &mut save.bssid);
+                }
+                WIFI_COUNT.store(save.wifi_counted, core::sync::atomic::Ordering::Relaxed);
+                save_postcard_to_flash(ADDR_OFFSET, &mut flash, SAVE_OFFSET, &save).unwrap();
+                info!("wifi_counted: {}", save.wifi_counted);
             }
-            WIFI_COUNT.store(save.wifi_counted, core::sync::atomic::Ordering::Relaxed);
-            save_postcard_to_flash(ADDR_OFFSET, &mut flash, SAVE_OFFSET, &save).unwrap();
-            info!("wifi_counted: {}", save.wifi_counted);
+
+            control
+                .set_power_management(PowerManagementMode::PowerSave)
+                .await;
         }
         if current_cycle >= reset_cycle {
             current_cycle = 0;
@@ -425,7 +443,7 @@ async fn main(spawner: Spawner) {
 
         if go_to_sleep {
             info!("going to sleep");
-            Timer::after(Duration::from_secs(25)).await;
+            // Timer::after(Duration::from_secs(25)).await;
             //Set the rtc and sleep for 15 minutes
             //goes to sleep for 15 mins
             _ = rtc_device.disable_all_alarms();
@@ -433,7 +451,10 @@ async fn main(spawner: Spawner) {
             _ = rtc_device.set_alarm_minutes(15);
             _ = rtc_device.control_alarm_minutes(Control::On);
             _ = rtc_device.control_alarm_interrupt(Control::On);
-            power.set_low();
+            // power_latch.set_low();
+            control
+                .set_power_management(PowerManagementMode::PowerSave)
+                .await;
         }
 
         current_cycle += 1;
