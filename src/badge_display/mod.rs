@@ -15,6 +15,7 @@ use embassy_sync::{
         self,
         raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
     },
+    mutex::Mutex,
     signal::Signal,
 };
 use embassy_time::{Delay, Timer};
@@ -34,6 +35,7 @@ use embedded_text::{
 };
 use gpio::Output;
 use heapless::{String, Vec};
+use time::PrimitiveDateTime;
 use tinybmp::Bmp;
 use uc8151::{LUT, WIDTH, asynch::Uc8151};
 use {defmt_rtt as _, panic_probe as _};
@@ -53,8 +55,7 @@ pub static RECENT_WIFI_NETWORKS: blocking_mutex::Mutex<
 
 pub static CURRENT_IMAGE: AtomicU8 = AtomicU8::new(0);
 pub static WIFI_COUNT: AtomicU32 = AtomicU32::new(0);
-pub static RTC_TIME_STRING: blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<String<8>>> =
-    blocking_mutex::Mutex::new(RefCell::new(String::<8>::new()));
+pub static RTC_TIME: Mutex<ThreadModeRawMutex, Option<PrimitiveDateTime>> = Mutex::new(None);
 pub static TEMP: AtomicU8 = AtomicU8::new(0);
 pub static HUMIDITY: AtomicU8 = AtomicU8::new(0);
 
@@ -168,12 +169,7 @@ async fn draw_badge<SPI>(
     //     }
     // }
 
-    let mut time_text: String<8> = String::<8>::new();
-
     let time_box_rectangle_location = Point::new(0, 96);
-    RTC_TIME_STRING.lock(|x| {
-        time_text.push_str(x.borrow().as_str()).unwrap();
-    });
 
     //The bounds of the box for time and refresh area
     let time_bounds = Rectangle::new(time_box_rectangle_location, Size::new(88, 24));
@@ -188,18 +184,39 @@ async fn draw_badge<SPI>(
         .draw(display)
         .unwrap();
 
+    let date = RTC_TIME.lock().await;
+    match *date {
+        Some(when) => {
+            let str = get_display_time(when);
+
+            Text::new(
+                str.as_str(),
+                (
+                    time_box_rectangle_location.x + 8,
+                    time_box_rectangle_location.y + 16,
+                )
+                    .into(),
+                character_style,
+            )
+            .draw(display)
+            .unwrap();
+        }
+        None => {
+            Text::new(
+                "00:00 AM",
+                (
+                    time_box_rectangle_location.x + 8,
+                    time_box_rectangle_location.y + 16,
+                )
+                    .into(),
+                character_style,
+            )
+            .draw(display)
+            .unwrap();
+        }
+    };
+
     //Adding a y offset to the box location to fit inside the box
-    Text::new(
-        time_text.as_str(),
-        (
-            time_box_rectangle_location.x + 8,
-            time_box_rectangle_location.y + 16,
-        )
-            .into(),
-        character_style,
-    )
-    .draw(display)
-    .unwrap();
 
     // let result = display
     //     .partial_update(time_bounds.try_into().unwrap())
@@ -300,4 +317,30 @@ async fn draw_wifi<SPI>(
     }
 
     display.update().await.ok();
+}
+
+fn get_display_time(time: PrimitiveDateTime) -> String<8> {
+    let mut am = true;
+    let twelve_hour = if time.hour() == 0 {
+        12
+    } else if time.hour() == 12 {
+        am = false;
+        12
+    } else if time.hour() > 12 {
+        am = false;
+        time.hour() - 12
+    } else {
+        time.hour()
+    };
+
+    let am_pm = if am { "AM" } else { "PM" };
+
+    let formatted_time = easy_format::<8>(format_args!(
+        "{:02}:{:02} {}",
+        twelve_hour,
+        time.minute(),
+        am_pm
+    ));
+
+    formatted_time
 }

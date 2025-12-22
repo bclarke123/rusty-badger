@@ -4,8 +4,8 @@
 use crate::http::http_get;
 use badge_display::display_image::DisplayImage;
 use badge_display::{
-    CURRENT_IMAGE, DISPLAY_CHANGED, RECENT_WIFI_NETWORKS, RTC_TIME_STRING, RecentWifiNetworksVec,
-    Screen, WIFI_COUNT, run_the_display,
+    CURRENT_IMAGE, DISPLAY_CHANGED, RECENT_WIFI_NETWORKS, RTC_TIME, RecentWifiNetworksVec, Screen,
+    WIFI_COUNT, run_the_display,
 };
 use core::fmt::Write;
 use cyw43::{JoinOptions, PowerManagementMode};
@@ -380,13 +380,15 @@ async fn main(spawner: Spawner) {
         }
 
         match rtc_device.get_datetime().await {
-            Ok(now) => set_display_time(now),
+            Ok(now) => {
+                let mut data = RTC_TIME.lock().await;
+                *data = Some(now);
+            }
             Err(_err) => {
                 error!("Error getting time");
-                RTC_TIME_STRING.lock(|rtc_time_string| {
-                    rtc_time_string.borrow_mut().clear();
-                    rtc_time_string.borrow_mut().push_str("Error").unwrap();
-                });
+
+                let mut data = RTC_TIME.lock().await;
+                *data = None;
             }
         };
 
@@ -444,38 +446,6 @@ async fn main(spawner: Spawner) {
         current_cycle += 1;
         Timer::after(cycle).await;
     }
-}
-
-fn set_display_time(time: PrimitiveDateTime) {
-    let mut am = true;
-    let twelve_hour = if time.hour() == 0 {
-        12
-    } else if time.hour() == 12 {
-        am = false;
-        12
-    } else if time.hour() > 12 {
-        am = false;
-        time.hour() - 12
-    } else {
-        time.hour()
-    };
-
-    let am_pm = if am { "AM" } else { "PM" };
-
-    let formatted_time = easy_format::<8>(format_args!(
-        "{:02}:{:02} {}",
-        twelve_hour,
-        time.minute(),
-        am_pm
-    ));
-
-    RTC_TIME_STRING.lock(|rtc_time_string| {
-        rtc_time_string.borrow_mut().clear();
-        rtc_time_string
-            .borrow_mut()
-            .push_str(formatted_time.as_str())
-            .unwrap();
-    });
 }
 
 #[embassy_executor::task]
