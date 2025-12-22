@@ -1633,6 +1633,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pcf85063a"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deeaedc27ac830842ffbf60fccdba5c9e09e01e7eb0036336c86068cc75ae8ba"
+dependencies = [
+ "embedded-hal-async",
+ "time",
+]
+
+[[package]]
 name = "petgraph"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2082,6 +2092,7 @@ dependencies = [
  "heapless 0.8.0",
  "log",
  "panic-probe",
+ "pcf85063a",
  "pio 0.2.1",
  "pio-proc 0.2.2",
  "portable-atomic",
@@ -2090,7 +2101,6 @@ dependencies = [
  "reqwless",
  "serde",
  "serde-json-core",
- "shtcx",
  "static_cell",
  "time",
  "tinybmp",
@@ -2208,15 +2218,6 @@ checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest",
  "keccak",
-]
-
-[[package]]
-name = "shtcx"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c25d66e6c78c6e19160a5b528cebe6f54d5737f091a2b90b08dbd7e63a9269f"
-dependencies = [
- "embedded-hal 1.0.0",
 ]
 
 [[package]]
