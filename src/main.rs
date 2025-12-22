@@ -23,7 +23,6 @@ use embassy_rp::peripherals::{DMA_CH0, I2C0, PIO0, SPI0};
 use embassy_rp::pio::Pio;
 use embassy_rp::spi::Spi;
 use embassy_rp::spi::{self};
-use embassy_rp::watchdog::Watchdog;
 use embassy_rp::{bind_interrupts, gpio, i2c};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -123,7 +122,6 @@ async fn main(spawner: Spawner) {
     let btn_a = Input::new(p.PIN_12, Pull::Down);
     let btn_b = Input::new(p.PIN_13, Pull::Down);
     let btn_c = Input::new(p.PIN_14, Pull::Down);
-    let mut watchdog = Watchdog::new(p.WATCHDOG);
 
     //Setup i2c bus
     let config = embassy_rp::i2c::Config::default();
@@ -169,9 +167,6 @@ async fn main(spawner: Spawner) {
         RoscRng.next_u64(),
     );
 
-    //If the watch dog isn't fed, reboot to help with hang up
-    watchdog.start(Duration::from_secs(8));
-
     spawner.must_spawn(net_task(runner));
     //Attempt to connect to wifi to get RTC time loop for 2 minutes
     let mut wifi_connection_attempts = 0;
@@ -180,7 +175,6 @@ async fn main(spawner: Spawner) {
     let wifi_ssid = env_value("WIFI_SSID");
     let wifi_password = env_value("WIFI_PASSWORD");
     while wifi_connection_attempts < 30 {
-        watchdog.feed();
         match control
             .join(wifi_ssid, JoinOptions::new(wifi_password.as_bytes()))
             .await
@@ -203,7 +197,6 @@ async fn main(spawner: Spawner) {
 
     if connected_to_wifi {
         //Feed the dog if it makes it this far
-        watchdog.feed();
         info!("waiting for DHCP...");
         while !stack.is_config_up() {
             Timer::after_millis(100).await;
@@ -224,9 +217,6 @@ async fn main(spawner: Spawner) {
         let mut rx_buffer = [0; 8192];
         let url = env_value("TIME_API");
         info!("connecting to {}", &url);
-
-        // Feeds the dog again for one last time
-        watchdog.feed();
 
         //If the call goes through set the rtc
         match http_get(&stack, url, &mut rx_buffer).await {
@@ -277,9 +267,6 @@ async fn main(spawner: Spawner) {
     let reset_cycle = 3_000;
 
     loop {
-        //Keep feeding the dog
-        watchdog.feed();
-
         //Change Image Button
         if btn_c.is_high() {
             info!("Button C pressed");
