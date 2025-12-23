@@ -4,7 +4,7 @@
 use crate::http::http_get;
 use badge_display::display_image::DisplayImage;
 use badge_display::{CURRENT_IMAGE, DISPLAY_CHANGED, RTC_TIME, Screen, run_the_display};
-use cyw43::JoinOptions;
+use cyw43::{Control, JoinOptions};
 use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
 use defmt::info;
 use defmt::*;
@@ -56,6 +56,8 @@ enum Button {
     Down,
 }
 static BUTTON_PRESSED: Signal<ThreadModeRawMutex, &'static Button> = Signal::new();
+
+pub static POWER_MUTEX: Mutex<ThreadModeRawMutex, ()> = Mutex::new(());
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -139,6 +141,11 @@ async fn main(spawner: Spawner) {
 
     blink(&mut user_led, 2).await;
 
+    DISPLAY_CHANGED.signal(Screen::Badge);
+    spawner.must_spawn(run_the_display(spi_bus, cs, dc, busy, reset));
+
+    Timer::after_millis(100).await;
+
     //wifi setup
     let config = embassy_net::Config::dhcpv4(Default::default());
 
@@ -153,67 +160,19 @@ async fn main(spawner: Spawner) {
 
     spawner.must_spawn(net_task(runner));
 
-    //Attempt to connect to wifi to get RTC time loop for 2 minutes
-    let mut wifi_connection_attempts = 0;
-    let mut connected_to_wifi = false;
+    {
+        let _guard = POWER_MUTEX.lock().await;
+        connect_to_wifi(&mut control, &stack).await;
 
-    let wifi_ssid = env_value("WIFI_SSID");
-    let wifi_password = env_value("WIFI_PASSWORD");
-    while wifi_connection_attempts < 30 {
-        match control
-            .join(wifi_ssid, JoinOptions::new(wifi_password.as_bytes()))
-            .await
-        {
-            Ok(_) => {
-                connected_to_wifi = true;
-                info!("join successful");
+        blink(&mut user_led, 3).await;
 
-                blink(&mut user_led, 3).await;
-
-                break;
-            }
-            Err(err) => {
-                info!("join failed with status={}", err.status);
-            }
-        }
-        Timer::after(Duration::from_secs(1)).await;
-        wifi_connection_attempts += 1;
+        Timer::after_millis(100).await;
     }
 
-    if connected_to_wifi {
-        //Feed the dog if it makes it this far
-        info!("waiting for DHCP...");
-        while !stack.is_config_up() {
-            Timer::after_millis(100).await;
-        }
-        info!("DHCP is now up!");
-
-        info!("waiting for link up...");
-        while !stack.is_link_up() {
-            Timer::after_millis(500).await;
-        }
-        info!("Link is up!");
-
-        info!("waiting for stack to be up...");
-        stack.wait_config_up().await;
-        info!("Stack is up!");
-
-        //RTC Web request
-        let mut rx_buffer = [0; 8192];
-        let url = env_value("TIME_API");
-        info!("connecting to {}", &url);
-
-        fetch_time(&stack, url, &mut rx_buffer, &mut rtc_device, &mut user_led).await;
-
-        // control.leave().await;
-    }
-
-    Timer::after_millis(100).await;
-
-    DISPLAY_CHANGED.signal(Screen::Badge);
-    spawner.must_spawn(run_the_display(spi_bus, cs, dc, busy, reset));
-
-    Timer::after_millis(500).await;
+    //RTC Web request
+    let mut rx_buffer = [0; 8192];
+    let url = env_value("TIME_API");
+    fetch_time(&stack, url, &mut rx_buffer, &mut rtc_device, &mut user_led).await;
 
     spawner.spawn(handle_presses(user_led)).ok();
 
@@ -226,6 +185,9 @@ async fn main(spawner: Spawner) {
         .ok();
 
     spawner.spawn(update_time(rtc_device)).ok();
+
+    Timer::after_millis(100).await;
+    DISPLAY_CHANGED.signal(Screen::Badge);
 }
 
 #[embassy_executor::task]
@@ -285,9 +247,60 @@ async fn update_time(mut rtc_device: PCF85063<SharedI2c>) -> ! {
     loop {
         Timer::after_secs(60).await;
 
-        let result = rtc_device.get_datetime().await.ok();
-        let mut data = RTC_TIME.lock().await;
-        *data = result;
+        let _guard = POWER_MUTEX.lock().await;
+        {
+            let result = rtc_device.get_datetime().await.ok();
+            let mut data = RTC_TIME.lock().await;
+            *data = result;
+
+            Timer::after_millis(50).await;
+        }
+    }
+}
+
+async fn connect_to_wifi(control: &mut Control<'_>, stack: &Stack<'_>) {
+    //Attempt to connect to wifi to get RTC time loop for 2 minutes
+    let mut wifi_connection_attempts = 0;
+    let mut connected_to_wifi = false;
+
+    let wifi_ssid = env_value("WIFI_SSID");
+    let wifi_password = env_value("WIFI_PASSWORD");
+
+    while wifi_connection_attempts < 30 {
+        match control
+            .join(wifi_ssid, JoinOptions::new(wifi_password.as_bytes()))
+            .await
+        {
+            Ok(_) => {
+                connected_to_wifi = true;
+                info!("join successful");
+                break;
+            }
+            Err(err) => {
+                info!("join failed with status={}", err.status);
+            }
+        }
+        Timer::after(Duration::from_secs(1)).await;
+        wifi_connection_attempts += 1;
+    }
+
+    if connected_to_wifi {
+        //Feed the dog if it makes it this far
+        info!("waiting for DHCP...");
+        while !stack.is_config_up() {
+            Timer::after_millis(100).await;
+        }
+        info!("DHCP is now up!");
+
+        info!("waiting for link up...");
+        while !stack.is_link_up() {
+            Timer::after_millis(100).await;
+        }
+        info!("Link is up!");
+
+        info!("waiting for stack to be up...");
+        stack.wait_config_up().await;
+        info!("Stack is up!");
     }
 }
 
@@ -298,6 +311,8 @@ async fn fetch_time(
     rtc_device: &mut PCF85063<SharedI2c>,
     user_led: &mut Output<'static>,
 ) {
+    let _guard = POWER_MUTEX.lock().await;
+
     match http_get(&stack, url, rx_buffer).await {
         Ok(bytes) => {
             match serde_json_core::de::from_slice::<TimeApiResponse>(bytes) {
@@ -327,6 +342,8 @@ async fn fetch_time(
             // return; // handle the error
         }
     };
+
+    Timer::after_millis(50).await;
 }
 
 #[derive(Deserialize)]

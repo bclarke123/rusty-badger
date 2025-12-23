@@ -30,7 +30,7 @@ use uc8151::{LUT, WIDTH, asynch::Uc8151};
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::{
-    Spi0Bus,
+    POWER_MUTEX, Spi0Bus,
     env::env_value,
     helpers::{easy_format, easy_format_str},
 };
@@ -67,22 +67,27 @@ pub async fn run_the_display(
             current_screen = new_screen;
         }
 
-        display.enable();
-        display.reset().await;
-        display.setup(LUT::Medium).await.ok();
+        let _guard = POWER_MUTEX.lock().await;
+        {
+            display.enable();
+            display.reset().await;
+            display.setup(LUT::Medium).await.ok();
 
-        Timer::after_millis(50).await;
+            Timer::after_millis(50).await;
 
-        match current_screen {
-            Screen::Badge => {
-                draw_badge(&mut display).await;
+            match current_screen {
+                Screen::Badge => {
+                    draw_badge(&mut display).await;
+                }
+                Screen::WifiList => {
+                    draw_wifi(&mut display).await;
+                }
             }
-            Screen::WifiList => {
-                draw_wifi(&mut display).await;
-            }
+
+            display.disable();
+
+            Timer::after_millis(50).await;
         }
-
-        display.disable();
     }
 }
 
