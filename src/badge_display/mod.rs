@@ -27,7 +27,6 @@ use heapless::String;
 use time::PrimitiveDateTime;
 use tinybmp::Bmp;
 use uc8151::{LUT, WIDTH, asynch::Uc8151};
-use {defmt_rtt as _, panic_probe as _};
 
 use crate::{
     POWER_MUTEX, Spi0Bus,
@@ -67,28 +66,35 @@ pub async fn run_the_display(
             current_screen = new_screen;
         }
 
-        let _guard = POWER_MUTEX.lock().await;
-        {
-            display.enable();
-            display.reset().await;
-            display.setup(LUT::Medium).await.ok();
+        draw_current_screen(&mut display, &current_screen).await;
+    }
+}
 
-            Timer::after_millis(50).await;
+async fn draw_current_screen<SPI>(
+    display: &mut Uc8151<SPI, Output<'static>, Input<'static>, Output<'static>, Delay>,
+    current_screen: &Screen,
+) where
+    SPI: SpiDevice,
+{
+    let _guard = POWER_MUTEX.lock().await;
+    display.enable();
+    display.reset().await;
+    display.setup(LUT::Medium).await.ok();
 
-            match current_screen {
-                Screen::Badge => {
-                    draw_badge(&mut display).await;
-                }
-                Screen::WifiList => {
-                    draw_wifi(&mut display).await;
-                }
-            }
+    Timer::after_millis(50).await;
 
-            display.disable();
-
-            Timer::after_millis(50).await;
+    match current_screen {
+        Screen::Badge => {
+            draw_badge(display).await;
+        }
+        Screen::WifiList => {
+            draw_wifi(display).await;
         }
     }
+
+    display.disable();
+
+    Timer::after_millis(50).await;
 }
 
 async fn draw_badge<SPI>(
