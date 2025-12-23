@@ -11,6 +11,7 @@ use defmt::info;
 use defmt::*;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_executor::Spawner;
+use embassy_futures::join::join;
 use embassy_net::{Stack, StackResources};
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::Input;
@@ -284,10 +285,17 @@ async fn run_network(
         if let Ok(_) = connect_to_wifi(&mut control, &stack).await {
             blink(user_led, 3).await;
 
-            fetch_time(&stack, &mut rx_buffer, rtc_device, user_led).await;
-            fetch_weather(&stack, &mut rx_buffer, user_led).await;
+            let (time_buf, weather_buf) = rx_buffer.split_at_mut(4096);
+
+            join(
+                fetch_time(&stack, time_buf, rtc_device),
+                fetch_weather(&stack, weather_buf),
+            )
+            .await;
 
             control.leave().await;
+
+            blink(user_led, 4).await;
 
             DISPLAY_CHANGED.signal(Screen::Badge);
         }
@@ -334,12 +342,11 @@ async fn fetch_time(
     stack: &Stack<'_>,
     rx_buf: &mut [u8],
     rtc_device: &Mutex<ThreadModeRawMutex, PCF85063<SharedI2c>>,
-    user_led: &Mutex<ThreadModeRawMutex, Output<'static>>,
 ) {
     let url = env_value("TIME_API");
     let _guard = POWER_MUTEX.lock().await;
 
-    if let Ok(response) = fetch_api::<TimeApiResponse>(&stack, rx_buf, user_led, url).await {
+    if let Ok(response) = fetch_api::<TimeApiResponse>(&stack, rx_buf, url).await {
         let datetime: PrimitiveDateTime = response.into();
 
         rtc_device
@@ -354,15 +361,11 @@ async fn fetch_time(
     }
 }
 
-async fn fetch_weather(
-    stack: &Stack<'_>,
-    rx_buf: &mut [u8],
-    user_led: &Mutex<ThreadModeRawMutex, Output<'static>>,
-) {
+async fn fetch_weather(stack: &Stack<'_>, rx_buf: &mut [u8]) {
     let url = env_value("TEMP_API");
     let _guard = POWER_MUTEX.lock().await;
 
-    if let Ok(response) = fetch_api::<OpenMeteoResponse>(&stack, rx_buf, user_led, url).await {
+    if let Ok(response) = fetch_api::<OpenMeteoResponse>(&stack, rx_buf, url).await {
         info!(
             "Temp: {}C, Code: {}",
             response.current.temperature, response.current.weathercode
@@ -379,33 +382,22 @@ async fn fetch_weather(
     }
 }
 
-async fn fetch_api<'a, T>(
-    stack: &Stack<'_>,
-    rx_buf: &'a mut [u8],
-    user_led: &Mutex<ThreadModeRawMutex, Output<'static>>,
-    url: &str,
-) -> Result<T, ()>
+async fn fetch_api<'a, T>(stack: &Stack<'_>, rx_buf: &'a mut [u8], url: &str) -> Result<T, ()>
 where
     T: Deserialize<'a>,
 {
     match http_get(&stack, url, rx_buf).await {
         Ok(bytes) => match serde_json_core::de::from_slice::<T>(bytes) {
             Ok((response, _)) => {
-                blink(user_led, 4).await;
-
                 return Ok(response);
             }
             Err(_e) => {
                 error!("Failed to parse response body");
-                blink(user_led, 1).await;
-
                 return Err(());
             }
         },
         Err(e) => {
             error!("Failed to make weather API request: {:?}", e);
-            blink(user_led, 1).await;
-
             return Err(());
         }
     }
