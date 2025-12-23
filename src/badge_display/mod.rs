@@ -1,23 +1,12 @@
 pub mod display_image;
 
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicU8, AtomicU32},
-};
-use defmt::*;
+use core::sync::atomic::AtomicU8;
 use display_image::get_current_image;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice as AsyncSpiDevice;
 use embassy_futures::select::{Either, select};
 use embassy_rp::gpio;
 use embassy_rp::gpio::Input;
-use embassy_sync::{
-    blocking_mutex::{
-        self,
-        raw::{CriticalSectionRawMutex, ThreadModeRawMutex},
-    },
-    mutex::Mutex,
-    signal::Signal,
-};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{Delay, Timer};
 use embedded_graphics::{
     image::Image,
@@ -34,7 +23,7 @@ use embedded_text::{
     style::{HeightMode, TextBoxStyleBuilder},
 };
 use gpio::Output;
-use heapless::{String, Vec};
+use heapless::String;
 use time::PrimitiveDateTime;
 use tinybmp::Bmp;
 use uc8151::{LUT, WIDTH, asynch::Uc8151};
@@ -46,15 +35,7 @@ use crate::{
     helpers::{easy_format, easy_format_str},
 };
 
-pub type RecentWifiNetworksVec = Vec<String<32>, 4>;
-
-pub static RECENT_WIFI_NETWORKS: blocking_mutex::Mutex<
-    CriticalSectionRawMutex,
-    RefCell<RecentWifiNetworksVec>,
-> = blocking_mutex::Mutex::new(RefCell::new(RecentWifiNetworksVec::new()));
-
 pub static CURRENT_IMAGE: AtomicU8 = AtomicU8::new(0);
-pub static WIFI_COUNT: AtomicU32 = AtomicU32::new(0);
 pub static RTC_TIME: Mutex<ThreadModeRawMutex, Option<PrimitiveDateTime>> = Mutex::new(None);
 pub static TEMP: AtomicU8 = AtomicU8::new(0);
 pub static HUMIDITY: AtomicU8 = AtomicU8::new(0);
@@ -77,10 +58,6 @@ pub async fn run_the_display(
 ) {
     let spi_dev = AsyncSpiDevice::new(&spi_bus, cs);
     let mut display = Uc8151::new(spi_dev, dc, busy, reset, Delay);
-
-    info!("Name: {}", env_value("NAME"));
-    info!("Details: {}", env_value("DETAILS"));
-
     let mut current_screen = Screen::Badge;
 
     loop {
@@ -92,7 +69,8 @@ pub async fn run_the_display(
 
         display.enable();
         display.reset().await;
-        let _ = display.setup(LUT::Medium).await;
+        display.setup(LUT::Medium).await.ok();
+
         Timer::after_millis(50).await;
 
         match current_screen {
@@ -136,14 +114,10 @@ async fn draw_badge<SPI>(
 
     name_and_detail_box.draw(display).unwrap();
 
-    let count = WIFI_COUNT.load(core::sync::atomic::Ordering::Relaxed);
-    info!("Wifi count: {}", count);
     let temp = TEMP.load(core::sync::atomic::Ordering::Relaxed);
     let humidity = HUMIDITY.load(core::sync::atomic::Ordering::Relaxed);
-    let top_text: String<64> = easy_format::<64>(format_args!(
-        "{}F {}% Wifi found: {}",
-        temp, humidity, count
-    ));
+    let top_text: String<64> =
+        easy_format::<64>(format_args!("{}F {}% Wifi found: {}", temp, humidity, 0));
     let top_bounds = Rectangle::new(Point::new(0, 0), Size::new(WIDTH, 24));
     top_bounds
         .into_styled(
@@ -266,12 +240,7 @@ async fn draw_wifi<SPI>(
         .draw(display)
         .unwrap();
 
-    let top_text: String<64> = easy_format::<64>(format_args!(
-        "Wifi found: {}",
-        WIFI_COUNT.load(core::sync::atomic::Ordering::Relaxed)
-    ));
-
-    Text::new(top_text.as_str(), Point::new(8, 16), character_style)
+    Text::new("Wifi found: 0", Point::new(8, 16), character_style)
         .draw(display)
         .unwrap();
 
@@ -284,37 +253,37 @@ async fn draw_wifi<SPI>(
     // }
 
     //write the wifi list
-    let mut y_offset = 24;
-    let wifi_list = RECENT_WIFI_NETWORKS.lock(|x| x.borrow().clone());
-    for wifi in wifi_list.iter() {
-        // let wifi_text: String<64> = easy_format::<64>(format_args!("{}", wifi));
-        let wifi_bounds = Rectangle::new(Point::new(0, y_offset), Size::new(WIDTH, 24));
-        wifi_bounds
-            .into_styled(
-                PrimitiveStyleBuilder::default()
-                    .stroke_color(BinaryColor::Off)
-                    .fill_color(BinaryColor::On)
-                    .stroke_width(1)
-                    .build(),
-            )
-            .draw(display)
-            .unwrap();
+    // let mut y_offset = 24;
+    // let wifi_list = RECENT_WIFI_NETWORKS.lock(|x| x.borrow().clone());
+    // for wifi in wifi_list.iter() {
+    //     // let wifi_text: String<64> = easy_format::<64>(format_args!("{}", wifi));
+    //     let wifi_bounds = Rectangle::new(Point::new(0, y_offset), Size::new(WIDTH, 24));
+    //     wifi_bounds
+    //         .into_styled(
+    //             PrimitiveStyleBuilder::default()
+    //                 .stroke_color(BinaryColor::Off)
+    //                 .fill_color(BinaryColor::On)
+    //                 .stroke_width(1)
+    //                 .build(),
+    //         )
+    //         .draw(display)
+    //         .unwrap();
 
-        Text::new(wifi.trim(), Point::new(8, y_offset + 16), character_style)
-            .draw(display)
-            .unwrap();
+    //     Text::new(wifi.trim(), Point::new(8, y_offset + 16), character_style)
+    //         .draw(display)
+    //         .unwrap();
 
-        // let result = display
-        //     .partial_update(wifi_bounds.try_into().unwrap())
-        //     .await;
-        // match result {
-        //     Ok(_) => {}
-        //     Err(_) => {
-        //         info!("Error updating display");
-        //     }
-        // }
-        y_offset += 24;
-    }
+    // let result = display
+    //     .partial_update(wifi_bounds.try_into().unwrap())
+    //     .await;
+    // match result {
+    //     Ok(_) => {}
+    //     Err(_) => {
+    //         info!("Error updating display");
+    //     }
+    // }
+    //     y_offset += 24;
+    // }
 
     display.update().await.ok();
 }
