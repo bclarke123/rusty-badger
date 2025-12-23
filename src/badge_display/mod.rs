@@ -124,26 +124,29 @@ async fn draw_badge<SPI>(
 
     name_and_detail_box.draw(display).unwrap();
 
+    let top_bounds = Rectangle::new(Point::new(0, 0), Size::new(WIDTH, 24));
+    let time_box_rectangle_location = Point::new((WIDTH - 88) as i32, 0);
+
+    top_bounds
+        .into_styled(
+            PrimitiveStyleBuilder::default()
+                .stroke_color(BinaryColor::Off)
+                .fill_color(BinaryColor::On)
+                .stroke_width(1)
+                .build(),
+        )
+        .draw(display)
+        .unwrap();
+
     {
         let data = *WEATHER.lock().await;
         if data.is_some() {
             let data = data.unwrap();
             let top_text: String<64> = easy_format::<64>(format_args!(
-                "{} C | {}",
+                "{}C | {} |",
                 data.temperature,
                 weather_description(data.weathercode)
             ));
-            let top_bounds = Rectangle::new(Point::new(0, 0), Size::new(WIDTH, 24));
-            top_bounds
-                .into_styled(
-                    PrimitiveStyleBuilder::default()
-                        .stroke_color(BinaryColor::Off)
-                        .fill_color(BinaryColor::On)
-                        .stroke_width(1)
-                        .build(),
-                )
-                .draw(display)
-                .unwrap();
 
             Text::new(top_text.as_str(), Point::new(8, 16), character_style)
                 .draw(display)
@@ -160,55 +163,29 @@ async fn draw_badge<SPI>(
     //     }
     // }
 
-    let time_box_rectangle_location = Point::new(0, 96);
+    {
+        let date = RTC_TIME.lock().await;
+        match *date {
+            Some(when) => {
+                let str = get_display_time(when);
 
-    //The bounds of the box for time and refresh area
-    let time_bounds = Rectangle::new(time_box_rectangle_location, Size::new(88, 24));
-    time_bounds
-        .into_styled(
-            PrimitiveStyleBuilder::default()
-                .stroke_color(BinaryColor::Off)
-                .fill_color(BinaryColor::On)
-                .stroke_width(1)
-                .build(),
-        )
-        .draw(display)
-        .unwrap();
-
-    let date = RTC_TIME.lock().await;
-    match *date {
-        Some(when) => {
-            let str = get_display_time(when);
-
-            Text::new(
-                str.as_str(),
-                (
-                    time_box_rectangle_location.x + 8,
-                    time_box_rectangle_location.y + 16,
+                Text::new(
+                    str.as_str(),
+                    (
+                        time_box_rectangle_location.x + 8,
+                        time_box_rectangle_location.y + 16,
+                    )
+                        .into(),
+                    character_style,
                 )
-                    .into(),
-                character_style,
-            )
-            .draw(display)
-            .unwrap();
-        }
-        None => {
-            Text::new(
-                "00:00 AM",
-                (
-                    time_box_rectangle_location.x + 8,
-                    time_box_rectangle_location.y + 16,
-                )
-                    .into(),
-                character_style,
-            )
-            .draw(display)
-            .unwrap();
-        }
-    };
+                .draw(display)
+                .unwrap();
+            }
+            None => {}
+        };
+    }
 
-    //Adding a y offset to the box location to fit inside the box
-
+    // let time_bounds = Rectangle::new(time_box_rectangle_location, Size::new(88, 24));
     // let result = display
     //     .partial_update(time_bounds.try_into().unwrap())
     //     .await;
@@ -218,8 +195,6 @@ async fn draw_badge<SPI>(
     //         info!("Error updating display");
     //     }
     // }
-
-    //Manually triggered display events
 
     let current_image = get_current_image();
     let tga: Bmp<BinaryColor> = Bmp::from_slice(&current_image.image()).unwrap();
@@ -333,25 +308,25 @@ fn get_display_time(time: PrimitiveDateTime) -> String<8> {
 
 fn weather_description(code: u8) -> &'static str {
     match code {
-        0 => "Clear Sky",
+        0 => "Clear",
         1 => "Mainly Clear",
-        2 => "Partly Cloudy",
-        3 => "Overcast",
+        2 => "Part Cloudy",
+        3 => "Cloudy",
         45 | 48 => "Fog",
         51 | 53 | 55 => "Drizzle",
-        56 | 57 => "Freezing Drizzle",
-        61 => "Slight Rain",
+        56 | 57 => "Frizzle",
+        61 => "Light Rain",
         63 => "Rain",
         65 => "Heavy Rain",
-        66 | 67 => "Freezing Rain",
-        71 => "Slight Snow",
+        66 | 67 => "Frzing Rain",
+        71 => "Light Snow",
         73 => "Snow",
         75 => "Heavy Snow",
         77 => "Snow Grains",
         80 | 81 | 82 => "Rain Showers",
         85 | 86 => "Snow Showers",
         95 => "Thunderstorm",
-        96 | 99 => "Thunderstorm & Hail",
+        96 | 99 => "Hailstorm",
         _ => "Unknown",
     }
 }
