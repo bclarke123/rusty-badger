@@ -267,15 +267,14 @@ async fn cyw43_task(
 
 #[embassy_executor::task]
 async fn update_time(rtc_device: &'static Mutex<ThreadModeRawMutex, PCF85063<SharedI2c>>) -> ! {
-    let mut sec_delay = 60;
-
     loop {
-        Timer::after_secs(sec_delay).await;
-        get_time(rtc_device).await;
+        let delay = match *RTC_TIME.lock().await {
+            Some(time) => 60 - time.second().clamp(0, 50),
+            None => 60,
+        } as u64;
 
-        if let Some(time) = *RTC_TIME.lock().await {
-            sec_delay = (60 - time.second().clamp(0, 50)) as u64;
-        }
+        Timer::after_secs(delay).await;
+        get_time(rtc_device).await;
 
         DISPLAY_CHANGED.signal(Screen::TopBar);
     }

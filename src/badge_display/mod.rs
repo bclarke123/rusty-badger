@@ -29,6 +29,7 @@ pub static CURRENT_IMAGE: AtomicU8 = AtomicU8::new(0);
 #[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
 pub enum Screen {
     // Weather,
+    #[allow(dead_code)]
     Time,
     TopBar,
     Image,
