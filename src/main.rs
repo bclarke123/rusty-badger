@@ -5,10 +5,12 @@ mod badge_display;
 mod helpers;
 mod http;
 mod state;
+mod time;
 mod wifi;
 
 use crate::http::{fetch_time, fetch_weather};
 use crate::state::{CURRENT_IMAGE, DISPLAY_CHANGED, POWER_MUTEX, RTC_TIME, Screen};
+use crate::time::get_time;
 use badge_display::display_image::DisplayImage;
 use badge_display::run_the_display;
 use cyw43::Control;
@@ -189,13 +191,6 @@ async fn main(spawner: Spawner) {
             .spawn(run_network(control, stack, user_led, rtc_device))
             .ok();
     }
-}
-
-async fn get_time(rtc_device: &'static Mutex<ThreadModeRawMutex, RtcDevice>) {
-    let _guard = POWER_MUTEX.lock().await;
-    let result = rtc_device.lock().await.get_datetime().await.ok();
-    let mut data = RTC_TIME.lock().await;
-    *data = result;
 }
 
 #[embassy_executor::task(pool_size = 5)]
