@@ -35,8 +35,6 @@ use static_cell::StaticCell;
 
 use {defmt_rtt as _, panic_reset as _};
 
-type MutexObj<T> = Mutex<ThreadModeRawMutex, T>;
-
 type Spi0Bus = Mutex<NoopRawMutex, Spi<'static, SPI0, spi::Async>>;
 
 type AsyncI2c0 = I2c<'static, I2C0, i2c::Async>;
@@ -44,6 +42,7 @@ type I2c0Bus = Mutex<ThreadModeRawMutex, AsyncI2c0>;
 type SharedI2c = I2cDevice<'static, ThreadModeRawMutex, AsyncI2c0>;
 type RtcDriver = PCF85063<SharedI2c>;
 
+type MutexObj<T> = Mutex<ThreadModeRawMutex, T>;
 pub type RtcDevice = MutexObj<RtcDriver>;
 pub type UserLed = MutexObj<Output<'static>>;
 
@@ -109,7 +108,6 @@ async fn main(spawner: Spawner) {
             spi::Config::default(),
         );
 
-        //SPI Bus setup to run the e-ink display
         static SPI_BUS: StaticCell<Spi0Bus> = StaticCell::new();
         let spi_bus = SPI_BUS.init(Mutex::new(spi));
 
@@ -168,11 +166,9 @@ async fn main(spawner: Spawner) {
             .set_power_management(cyw43::PowerManagementMode::PowerSave)
             .await;
 
-        // Wifi setup
         let config = embassy_net::Config::dhcpv4(Default::default());
-
-        // Init network stack
         static RESOURCES: StaticCell<StackResources<5>> = StaticCell::new();
+
         let (stack, netrunner) = embassy_net::new(
             net_device,
             config,
