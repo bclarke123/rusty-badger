@@ -2,8 +2,6 @@ use defmt::{Format, error};
 use embassy_net::Stack;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::mutex::Mutex;
 use heapless::Vec;
 use log::info;
 use reqwless::client::HttpClient;
@@ -84,11 +82,7 @@ where
     }
 }
 
-pub async fn fetch_time(
-    stack: &Stack<'_>,
-    rx_buf: &mut [u8],
-    rtc_device: &Mutex<ThreadModeRawMutex, RtcDevice>,
-) {
+pub async fn fetch_time(stack: &Stack<'_>, rx_buf: &mut [u8], rtc_device: &RtcDevice) {
     let _guard = POWER_MUTEX.lock().await;
 
     if let Ok(response) = fetch_api::<TimeApiResponse>(stack, rx_buf, TIME_API).await {

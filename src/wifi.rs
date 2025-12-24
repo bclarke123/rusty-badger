@@ -1,8 +1,6 @@
 use cyw43::{Control, JoinOptions};
 use embassy_futures::join::join;
 use embassy_net::Stack;
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 use log::info;
 
@@ -55,7 +53,7 @@ pub async fn run_network(
     mut control: Control<'static>,
     stack: Stack<'static>,
     user_led: &'static UserLed,
-    rtc_device: &'static Mutex<ThreadModeRawMutex, RtcDevice>,
+    rtc_device: &'static RtcDevice,
 ) -> ! {
     let mut rx_buffer = [0; 8192];
 

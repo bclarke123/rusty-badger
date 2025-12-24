@@ -35,20 +35,24 @@ use static_cell::StaticCell;
 
 use {defmt_rtt as _, panic_reset as _};
 
+type MutexObj<T> = Mutex<ThreadModeRawMutex, T>;
+
 type Spi0Bus = Mutex<NoopRawMutex, Spi<'static, SPI0, spi::Async>>;
 
 type AsyncI2c0 = I2c<'static, I2C0, i2c::Async>;
 type I2c0Bus = Mutex<ThreadModeRawMutex, AsyncI2c0>;
 type SharedI2c = I2cDevice<'static, ThreadModeRawMutex, AsyncI2c0>;
-pub type RtcDevice = PCF85063<SharedI2c>;
-pub type UserLed = Mutex<ThreadModeRawMutex, Output<'static>>;
+type RtcDriver = PCF85063<SharedI2c>;
+
+pub type RtcDevice = MutexObj<RtcDriver>;
+pub type UserLed = MutexObj<Output<'static>>;
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<peripherals::PIO0>;
     I2C0_IRQ => i2c::InterruptHandler<peripherals::I2C0>;
 });
 
-static RTC_DEVICE: StaticCell<Mutex<ThreadModeRawMutex, RtcDevice>> = StaticCell::new();
+static RTC_DEVICE: StaticCell<RtcDevice> = StaticCell::new();
 static USER_LED: StaticCell<UserLed> = StaticCell::new();
 
 #[embassy_executor::main]
@@ -74,7 +78,7 @@ async fn main(spawner: Spawner) {
         let i2c_bus = I2C_BUS.init(i2c_bus);
 
         let i2c_dev = I2cDevice::new(i2c_bus);
-        let rtc = RtcDevice::new(i2c_dev);
+        let rtc = RtcDriver::new(i2c_dev);
         rtc_device = RTC_DEVICE.init(Mutex::new(rtc));
 
         get_time(rtc_device).await;
