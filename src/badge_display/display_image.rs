@@ -1,6 +1,6 @@
 use embedded_graphics::prelude::Point;
 
-use super::CURRENT_IMAGE;
+use crate::state::CURRENT_IMAGE;
 
 static NUMBER_OF_IMAGES: u8 = 3;
 static FERRIS_IMG: &[u8] = include_bytes!("../../images/julian.bmp");

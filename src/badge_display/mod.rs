@@ -1,11 +1,9 @@
 pub mod display_image;
 
-use core::sync::atomic::AtomicU8;
 use display_image::get_current_image;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice as AsyncSpiDevice;
 use embassy_rp::gpio;
 use embassy_rp::gpio::Input;
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 use embassy_time::{Delay, Timer};
 use embedded_graphics::{
     image::Image,
@@ -25,22 +23,8 @@ use uc8151::{HEIGHT, LUT, WIDTH, asynch::Uc8151};
 use crate::{
     Spi0Bus,
     helpers::easy_format,
-    state::{POWER_MUTEX, RTC_TIME, WEATHER},
+    state::{DISPLAY_CHANGED, POWER_MUTEX, RTC_TIME, Screen, WEATHER},
 };
-
-pub static CURRENT_IMAGE: AtomicU8 = AtomicU8::new(0);
-
-#[derive(Debug, Clone, Copy, PartialEq, defmt::Format)]
-pub enum Screen {
-    // Weather,
-    #[allow(dead_code)]
-    Time,
-    TopBar,
-    Image,
-    Full,
-}
-
-pub static DISPLAY_CHANGED: Signal<ThreadModeRawMutex, Screen> = Signal::new();
 
 #[embassy_executor::task]
 pub async fn run_the_display(

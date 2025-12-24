@@ -8,9 +8,9 @@ mod state;
 mod wifi;
 
 use crate::http::{fetch_time, fetch_weather};
-use crate::state::{POWER_MUTEX, RTC_TIME};
+use crate::state::{CURRENT_IMAGE, DISPLAY_CHANGED, POWER_MUTEX, RTC_TIME, Screen};
 use badge_display::display_image::DisplayImage;
-use badge_display::{CURRENT_IMAGE, DISPLAY_CHANGED, Screen, run_the_display};
+use badge_display::run_the_display;
 use cyw43::Control;
 use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
