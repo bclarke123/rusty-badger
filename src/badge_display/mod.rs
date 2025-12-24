@@ -22,7 +22,11 @@ use time::PrimitiveDateTime;
 use tinybmp::Bmp;
 use uc8151::{HEIGHT, LUT, WIDTH, asynch::Uc8151};
 
-use crate::{POWER_MUTEX, RTC_TIME, Spi0Bus, WEATHER, helpers::easy_format};
+use crate::{
+    Spi0Bus,
+    helpers::easy_format,
+    state::{POWER_MUTEX, RTC_TIME, WEATHER},
+};
 
 pub static CURRENT_IMAGE: AtomicU8 = AtomicU8::new(0);
 

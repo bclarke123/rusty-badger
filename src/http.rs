@@ -2,8 +2,20 @@ use defmt::{Format, error};
 use embassy_net::Stack;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::mutex::Mutex;
+use heapless::Vec;
+use log::info;
 use reqwless::client::HttpClient;
 use reqwless::request::{Method, RequestBuilder};
+use serde::Deserialize;
+use time::{Date, Month, PrimitiveDateTime, Time};
+
+use crate::RtcDevice;
+use crate::state::{CurrentWeather, POWER_MUTEX, RTC_TIME, WEATHER};
+
+static TIME_API: &str = env!("TIME_API");
+static TEMP_API: &str = env!("TEMP_API");
 
 #[derive(Format)]
 pub struct HttpError;
@@ -51,4 +63,94 @@ pub async fn http_get<'a, 'b>(
             Err(HttpError)
         }
     }
+}
+
+pub async fn fetch_api<'a, T>(stack: &Stack<'_>, rx_buf: &'a mut [u8], url: &str) -> Result<T, ()>
+where
+    T: Deserialize<'a>,
+{
+    match http_get(stack, url, rx_buf).await {
+        Ok(bytes) => match serde_json_core::de::from_slice::<T>(bytes) {
+            Ok((response, _)) => Ok(response),
+            Err(_e) => {
+                error!("Failed to parse response body");
+                Err(())
+            }
+        },
+        Err(e) => {
+            error!("Failed to make weather API request: {:?}", e);
+            Err(())
+        }
+    }
+}
+
+pub async fn fetch_time(
+    stack: &Stack<'_>,
+    rx_buf: &mut [u8],
+    rtc_device: &Mutex<ThreadModeRawMutex, RtcDevice>,
+) {
+    let _guard = POWER_MUTEX.lock().await;
+
+    if let Ok(response) = fetch_api::<TimeApiResponse>(stack, rx_buf, TIME_API).await {
+        let datetime: PrimitiveDateTime = response.into();
+
+        rtc_device
+            .lock()
+            .await
+            .set_datetime(&datetime)
+            .await
+            .expect("TODO: panic message");
+
+        let mut data = RTC_TIME.lock().await;
+        *data = Some(datetime);
+    }
+}
+
+pub async fn fetch_weather(stack: &Stack<'_>, rx_buf: &mut [u8]) {
+    let _guard = POWER_MUTEX.lock().await;
+
+    if let Ok(response) = fetch_api::<OpenMeteoResponse>(stack, rx_buf, TEMP_API).await {
+        info!(
+            "Temp: {}C, Code: {}",
+            response.current.temperature, response.current.weathercode
+        );
+
+        let mut data = WEATHER.lock().await;
+        *data = Some(response.current);
+    }
+}
+
+#[derive(Deserialize)]
+struct TimeApiResponse<'a> {
+    datetime: &'a str,
+}
+
+impl<'a> From<TimeApiResponse<'a>> for PrimitiveDateTime {
+    fn from(response: TimeApiResponse) -> Self {
+        info!("Datetime: {:?}", response.datetime);
+        //split at T
+        let datetime = response.datetime.split('T').collect::<Vec<&str, 2>>();
+        //split at -
+        let date = datetime[0].split('-').collect::<Vec<&str, 3>>();
+        let year = date[0].parse::<i32>().unwrap();
+        let month = date[1].parse::<u8>().unwrap();
+        let day = date[2].parse::<u8>().unwrap();
+        //split at :
+        let time = datetime[1].split(':').collect::<Vec<&str, 4>>();
+        let hour = time[0].parse::<u8>().unwrap();
+        let minute = time[1].parse::<u8>().unwrap();
+        //split at .
+        let second_split = time[2].split('.').collect::<Vec<&str, 2>>();
+        let second = second_split[0].parse::<u8>().unwrap();
+
+        let date = Date::from_calendar_date(year, Month::try_from(month).unwrap(), day).unwrap();
+        let time = Time::from_hms(hour, minute, second).unwrap();
+
+        PrimitiveDateTime::new(date, time)
+    }
+}
+
+#[derive(Deserialize)]
+pub struct OpenMeteoResponse {
+    pub current: CurrentWeather,
 }

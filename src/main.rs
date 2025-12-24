@@ -4,13 +4,15 @@
 mod badge_display;
 mod helpers;
 mod http;
+mod state;
+mod wifi;
 
+use crate::http::{fetch_time, fetch_weather};
+use crate::state::{POWER_MUTEX, RTC_TIME};
 use badge_display::display_image::DisplayImage;
 use badge_display::{CURRENT_IMAGE, DISPLAY_CHANGED, Screen, run_the_display};
-use cyw43::{Control, JoinOptions};
+use cyw43::Control;
 use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
-use defmt::info;
-use defmt::*;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
@@ -25,14 +27,11 @@ use embassy_rp::{bind_interrupts, gpio, i2c, pio, spi};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, ThreadModeRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
-use embassy_time::{Duration, Timer};
+use embassy_time::Timer;
 use gpio::{Level, Output, Pull};
-use heapless::Vec;
-use http::http_get;
 use pcf85063a::PCF85063;
-use serde::Deserialize;
 use static_cell::StaticCell;
-use time::{Date, Month, PrimitiveDateTime, Time};
+
 use {defmt_rtt as _, panic_reset as _};
 
 type Spi0Bus = Mutex<NoopRawMutex, Spi<'static, SPI0, spi::Async>>;
@@ -40,6 +39,7 @@ type Spi0Bus = Mutex<NoopRawMutex, Spi<'static, SPI0, spi::Async>>;
 type AsyncI2c0 = I2c<'static, I2C0, i2c::Async>;
 type I2c0Bus = Mutex<ThreadModeRawMutex, AsyncI2c0>;
 type SharedI2c = I2cDevice<'static, ThreadModeRawMutex, AsyncI2c0>;
+pub type RtcDevice = PCF85063<SharedI2c>;
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<peripherals::PIO0>;
@@ -55,21 +55,8 @@ enum Button {
 }
 static BUTTON_PRESSED: Signal<ThreadModeRawMutex, &'static Button> = Signal::new();
 
-pub static POWER_MUTEX: Mutex<ThreadModeRawMutex, ()> = Mutex::new(());
-pub static RTC_TIME: Mutex<ThreadModeRawMutex, Option<PrimitiveDateTime>> = Mutex::new(None);
-pub static WEATHER: Mutex<ThreadModeRawMutex, Option<CurrentWeather>> = Mutex::new(None);
-
-static RTC_DEVICE: StaticCell<Mutex<ThreadModeRawMutex, PCF85063<SharedI2c>>> = StaticCell::new();
+static RTC_DEVICE: StaticCell<Mutex<ThreadModeRawMutex, RtcDevice>> = StaticCell::new();
 static USER_LED: StaticCell<Mutex<ThreadModeRawMutex, Output<'static>>> = StaticCell::new();
-
-static FW: &[u8] = include_bytes!("../cyw43-firmware/43439A0.bin");
-static CLM: &[u8] = include_bytes!("../cyw43-firmware/43439A0_clm.bin");
-
-static WIFI_SSID: &str = env!("WIFI_SSID");
-static WIFI_PASSWORD: &[u8] = include_bytes!("../.wifi");
-
-static TIME_API: &str = env!("TIME_API");
-static TEMP_API: &str = env!("TEMP_API");
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -94,7 +81,7 @@ async fn main(spawner: Spawner) {
         let i2c_bus = I2C_BUS.init(i2c_bus);
 
         let i2c_dev = I2cDevice::new(i2c_bus);
-        let rtc = PCF85063::new(i2c_dev);
+        let rtc = RtcDevice::new(i2c_dev);
         rtc_device = RTC_DEVICE.init(Mutex::new(rtc));
 
         get_time(rtc_device).await;
@@ -176,10 +163,10 @@ async fn main(spawner: Spawner) {
         );
         static STATE: StaticCell<cyw43::State> = StaticCell::new();
         let state = STATE.init(cyw43::State::new());
-        let (net_device, mut control, cywrunner) = cyw43::new(state, pwr, spi, FW).await;
+        let (net_device, mut control, cywrunner) = cyw43::new(state, pwr, spi, wifi::FW).await;
         spawner.must_spawn(cyw43_task(cywrunner));
 
-        control.init(CLM).await;
+        control.init(wifi::CLM).await;
         control
             .set_power_management(cyw43::PowerManagementMode::PowerSave)
             .await;
@@ -204,7 +191,7 @@ async fn main(spawner: Spawner) {
     }
 }
 
-async fn get_time(rtc_device: &'static Mutex<ThreadModeRawMutex, PCF85063<SharedI2c>>) {
+async fn get_time(rtc_device: &'static Mutex<ThreadModeRawMutex, RtcDevice>) {
     let _guard = POWER_MUTEX.lock().await;
     let result = rtc_device.lock().await.get_datetime().await.ok();
     let mut data = RTC_TIME.lock().await;
@@ -284,7 +271,7 @@ async fn run_network(
     let mut rx_buffer = [0; 8192];
 
     loop {
-        if connect_to_wifi(&mut control, &stack).await.is_ok() {
+        if wifi::connect(&mut control, &stack).await.is_ok() {
             blink(user_led, 3).await;
 
             let (time_buf, weather_buf) = rx_buffer.split_at_mut(4096);
@@ -306,92 +293,6 @@ async fn run_network(
     }
 }
 
-async fn connect_to_wifi(control: &mut Control<'_>, stack: &Stack<'_>) -> Result<(), ()> {
-    let _guard = POWER_MUTEX.lock().await;
-
-    let mut connected_to_wifi = false;
-
-    for _ in 0..30 {
-        match control
-            .join(WIFI_SSID, JoinOptions::new(WIFI_PASSWORD))
-            .await
-        {
-            Ok(_) => {
-                connected_to_wifi = true;
-                info!("join successful");
-                break;
-            }
-            Err(err) => {
-                info!("join failed with status={}", err.status);
-            }
-        }
-        Timer::after(Duration::from_secs(1)).await;
-    }
-
-    if !connected_to_wifi {
-        return Err(());
-    }
-
-    stack.wait_config_up().await;
-
-    Ok(())
-}
-
-async fn fetch_time(
-    stack: &Stack<'_>,
-    rx_buf: &mut [u8],
-    rtc_device: &Mutex<ThreadModeRawMutex, PCF85063<SharedI2c>>,
-) {
-    let _guard = POWER_MUTEX.lock().await;
-
-    if let Ok(response) = fetch_api::<TimeApiResponse>(stack, rx_buf, TIME_API).await {
-        let datetime: PrimitiveDateTime = response.into();
-
-        rtc_device
-            .lock()
-            .await
-            .set_datetime(&datetime)
-            .await
-            .expect("TODO: panic message");
-
-        let mut data = RTC_TIME.lock().await;
-        *data = Some(datetime);
-    }
-}
-
-async fn fetch_weather(stack: &Stack<'_>, rx_buf: &mut [u8]) {
-    let _guard = POWER_MUTEX.lock().await;
-
-    if let Ok(response) = fetch_api::<OpenMeteoResponse>(stack, rx_buf, TEMP_API).await {
-        info!(
-            "Temp: {}C, Code: {}",
-            response.current.temperature, response.current.weathercode
-        );
-
-        let mut data = WEATHER.lock().await;
-        *data = Some(response.current);
-    }
-}
-
-async fn fetch_api<'a, T>(stack: &Stack<'_>, rx_buf: &'a mut [u8], url: &str) -> Result<T, ()>
-where
-    T: Deserialize<'a>,
-{
-    match http_get(stack, url, rx_buf).await {
-        Ok(bytes) => match serde_json_core::de::from_slice::<T>(bytes) {
-            Ok((response, _)) => Ok(response),
-            Err(_e) => {
-                error!("Failed to parse response body");
-                Err(())
-            }
-        },
-        Err(e) => {
-            error!("Failed to make weather API request: {:?}", e);
-            Err(())
-        }
-    }
-}
-
 async fn blink(pin: &Mutex<ThreadModeRawMutex, Output<'_>>, n_times: usize) {
     for i in 0..n_times {
         pin.lock().await.set_high();
@@ -402,46 +303,4 @@ async fn blink(pin: &Mutex<ThreadModeRawMutex, Output<'_>>, n_times: usize) {
             Timer::after_millis(100).await;
         }
     }
-}
-
-#[derive(Deserialize)]
-struct TimeApiResponse<'a> {
-    datetime: &'a str,
-}
-
-impl<'a> From<TimeApiResponse<'a>> for PrimitiveDateTime {
-    fn from(response: TimeApiResponse) -> Self {
-        info!("Datetime: {:?}", response.datetime);
-        //split at T
-        let datetime = response.datetime.split('T').collect::<Vec<&str, 2>>();
-        //split at -
-        let date = datetime[0].split('-').collect::<Vec<&str, 3>>();
-        let year = date[0].parse::<i32>().unwrap();
-        let month = date[1].parse::<u8>().unwrap();
-        let day = date[2].parse::<u8>().unwrap();
-        //split at :
-        let time = datetime[1].split(':').collect::<Vec<&str, 4>>();
-        let hour = time[0].parse::<u8>().unwrap();
-        let minute = time[1].parse::<u8>().unwrap();
-        //split at .
-        let second_split = time[2].split('.').collect::<Vec<&str, 2>>();
-        let second = second_split[0].parse::<u8>().unwrap();
-
-        let date = Date::from_calendar_date(year, Month::try_from(month).unwrap(), day).unwrap();
-        let time = Time::from_hms(hour, minute, second).unwrap();
-
-        PrimitiveDateTime::new(date, time)
-    }
-}
-
-#[derive(Deserialize)]
-pub struct OpenMeteoResponse {
-    pub current: CurrentWeather,
-}
-
-#[derive(Deserialize, Copy, Clone)]
-pub struct CurrentWeather {
-    pub temperature: f32,
-    pub weathercode: u8,
-    pub is_day: u8,
 }
