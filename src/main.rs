@@ -101,8 +101,6 @@ async fn main(spawner: Spawner) {
         spawner.spawn(update_time(rtc_device)).ok();
     }
 
-    Timer::after_millis(100).await;
-
     // SPI e-ink display
     {
         let miso = p.PIN_16;
@@ -134,8 +132,6 @@ async fn main(spawner: Spawner) {
         DISPLAY_CHANGED.signal(Screen::Full);
         spawner.must_spawn(run_the_display(spi_bus, cs, dc, busy, reset));
     }
-
-    Timer::after_millis(100).await;
 
     // Button handlers
     {
@@ -213,8 +209,6 @@ async fn get_time(rtc_device: &'static Mutex<ThreadModeRawMutex, PCF85063<Shared
     let result = rtc_device.lock().await.get_datetime().await.ok();
     let mut data = RTC_TIME.lock().await;
     *data = result;
-
-    Timer::after_millis(50).await;
 }
 
 #[embassy_executor::task(pool_size = 5)]
@@ -399,11 +393,14 @@ where
 }
 
 async fn blink(pin: &Mutex<ThreadModeRawMutex, Output<'_>>, n_times: usize) {
-    for _ in 0..n_times {
+    for i in 0..n_times {
         pin.lock().await.set_high();
         Timer::after_millis(100).await;
         pin.lock().await.set_low();
-        Timer::after_millis(100).await;
+
+        if i < n_times - 1 {
+            Timer::after_millis(100).await;
+        }
     }
 }
 
