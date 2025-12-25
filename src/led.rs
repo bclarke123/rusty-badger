@@ -9,6 +9,12 @@ pub async fn blink(led: &UserLed, n_times: usize) {
     }
 }
 
+pub async fn loop_breathe(led: &UserLed) {
+    loop {
+        breathe(led, Duration::from_secs(1)).await;
+    }
+}
+
 pub async fn breathe(led: &UserLed, duration: Duration) {
     let top = 25_000;
     let delay = Duration::from_millis(10);
@@ -39,10 +45,4 @@ pub async fn breathe(led: &UserLed, duration: Duration) {
     // Ensure Off
     config.compare_a = 0;
     locked.set_config(&config);
-}
-
-pub async fn loop_breathe(led: &UserLed) {
-    loop {
-        breathe(led, Duration::from_secs(1)).await;
-    }
 }
