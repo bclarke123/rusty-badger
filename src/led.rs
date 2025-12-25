@@ -27,15 +27,15 @@ pub async fn blink(led: &UserLed, n_times: usize) {
 }
 
 pub async fn breathe(led: &UserLed) {
-    let mut config = Config::default();
+    let top = 25_000;
+    let steps = 100;
+    let delay = Duration::from_millis(10);
 
-    config.top = 25_000;
+    let mut config = Config::default();
+    config.top = top;
     config.compare_b = 0;
 
-    let steps = 100;
-    let top = config.top;
     let step = top / steps;
-    let delay = Duration::from_millis(10);
 
     let mut locked = led.lock().await;
 
