@@ -26,12 +26,16 @@ pub async fn handle_presses(user_led: &'static UserLed) -> ! {
     loop {
         let btn = BUTTON_PRESSED.wait().await;
 
-        blink(user_led, 1).await;
-
         match btn {
             Button::A => UPDATE_WEATHER.signal(()),
-            Button::B => DISPLAY_CHANGED.signal(Screen::Full),
+            Button::B => {
+                blink(user_led, 1).await;
+
+                DISPLAY_CHANGED.signal(Screen::Full);
+            }
             Button::C => {
+                blink(user_led, 1).await;
+
                 image::next();
                 DISPLAY_CHANGED.signal(Screen::Image);
             }
