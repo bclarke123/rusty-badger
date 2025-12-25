@@ -1,19 +1,18 @@
 use crate::state::CURRENT_IMAGE;
 use core::sync::atomic::Ordering;
 
-static FERRIS_IMG: &[u8] = include_bytes!("../images/julian.bmp");
-static REPO_IMG: &[u8] = include_bytes!("../images/repo.bmp");
-static MTRAS_LOGO: &[u8] = include_bytes!("../images/mtras_logo.bmp");
-
-static IMAGES: [&[u8]; 3] = [FERRIS_IMG, REPO_IMG, MTRAS_LOGO];
-static IMAGE_LOCATIONS: [(i32, i32); 3] = [(0, 24), (190, 26), (190, 26)];
+static IMAGES: [&[u8]; 3] = [
+    include_bytes!("../images/julian.bmp"),
+    include_bytes!("../images/tropical.bmp"),
+    include_bytes!("../images/2026.bmp"),
+];
 
 pub fn get_image() -> &'static [u8] {
     IMAGES[CURRENT_IMAGE.load(Ordering::Relaxed)]
 }
 
 pub fn get_position() -> (i32, i32) {
-    IMAGE_LOCATIONS[CURRENT_IMAGE.load(Ordering::Relaxed)]
+    (0, 24)
 }
 
 pub fn next() {
