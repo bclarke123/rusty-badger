@@ -1,6 +1,6 @@
-use embedded_graphics::prelude::Point;
-
 use crate::state::CURRENT_IMAGE;
+use core::sync::atomic::Ordering;
+use embedded_graphics::prelude::Point;
 
 static NUMBER_OF_IMAGES: u8 = 3;
 static FERRIS_IMG: &[u8] = include_bytes!("../images/julian.bmp");
@@ -14,13 +14,13 @@ pub enum DisplayImage {
 }
 
 pub fn get_current_image() -> DisplayImage {
-    DisplayImage::from_u8(CURRENT_IMAGE.load(core::sync::atomic::Ordering::Relaxed)).unwrap()
+    DisplayImage::from_u8(CURRENT_IMAGE.load(Ordering::Relaxed)).unwrap()
 }
 
 pub fn next() {
-    let current_image = CURRENT_IMAGE.load(core::sync::atomic::Ordering::Relaxed);
+    let current_image = CURRENT_IMAGE.load(Ordering::Relaxed);
     let new_image = DisplayImage::from_u8(current_image).unwrap().next();
-    CURRENT_IMAGE.store(new_image.as_u8(), core::sync::atomic::Ordering::Relaxed);
+    CURRENT_IMAGE.store(new_image.as_u8(), Ordering::Relaxed);
 }
 
 impl DisplayImage {
