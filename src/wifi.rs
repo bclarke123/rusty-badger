@@ -5,7 +5,7 @@ use embassy_time::{Duration, Timer};
 use log::info;
 
 use crate::{
-    RtcDevice, UserLed,
+    FlashDevice, RtcDevice, UserLed,
     http::{fetch_time, fetch_weather},
     led,
     state::{DISPLAY_CHANGED, POWER_MUTEX, Screen, UPDATE_WEATHER},
@@ -53,13 +53,14 @@ async fn sync(
     control: &mut Control<'static>,
     stack: Stack<'static>,
     rtc_device: &'static RtcDevice,
+    flash_driver: &'static FlashDevice,
 ) {
     if connect(control, &stack).await.is_ok() {
         let (time_buf, weather_buf) = rx_buffer.split_at_mut(4096);
 
         join(
             fetch_time(&stack, time_buf, rtc_device),
-            fetch_weather(&stack, weather_buf),
+            fetch_weather(&stack, weather_buf, flash_driver),
         )
         .await;
 
@@ -75,13 +76,20 @@ pub async fn run(
     stack: Stack<'static>,
     user_led: &'static UserLed,
     rtc_device: &'static RtcDevice,
+    flash_driver: &'static FlashDevice,
 ) -> ! {
     let mut rx_buffer = [0; 8192];
 
     loop {
         select(
             led::loop_breathe(user_led),
-            sync(&mut rx_buffer, &mut control, stack, rtc_device),
+            sync(
+                &mut rx_buffer,
+                &mut control,
+                stack,
+                rtc_device,
+                flash_driver,
+            ),
         )
         .await;
 

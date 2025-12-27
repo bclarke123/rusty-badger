@@ -85,7 +85,6 @@ embedded-hal-1 = { package = "embedded-hal", version = "1.0" }
 embedded-hal-async = "1.0"
 embedded-hal-bus = { version = "0.1", features = ["async"] }
 embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
-embedded-storage = { version = "0.3" }
 static_cell = "2"
 portable-atomic = { version = "1.5", features = ["critical-section"] }
 log = "0.4"
@@ -102,6 +101,7 @@ postcard = "1.0.8"
 time = { version = "0.3.17", default-features = false }
 pcf85063a = "0.1.1"
 embassy-futures = "0.1.2"
+embedded-storage-async = "0.4.1"
 
 [[bin]]
 name = "rusty_badger"

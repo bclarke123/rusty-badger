@@ -10,9 +10,9 @@ use reqwless::request::{Method, RequestBuilder};
 use serde::Deserialize;
 use time::{Date, Month, PrimitiveDateTime, Time};
 
-use crate::RtcDevice;
 use crate::state::{CurrentWeather, POWER_MUTEX, RTC_TIME, WEATHER};
 use crate::time::TRUST_TIME;
+use crate::{FlashDevice, RtcDevice, flash};
 
 static TIME_API: &str = env!("TIME_API");
 static TEMP_API: &str = env!("TEMP_API");
@@ -104,17 +104,25 @@ pub async fn fetch_time(stack: &Stack<'_>, rx_buf: &mut [u8], rtc_device: &RtcDe
     }
 }
 
-pub async fn fetch_weather(stack: &Stack<'_>, rx_buf: &mut [u8]) {
+pub async fn fetch_weather(
+    stack: &Stack<'_>,
+    rx_buf: &mut [u8],
+    flash_device: &'static FlashDevice,
+) {
     let _guard = POWER_MUTEX.lock().await;
 
     if let Ok(response) = fetch_api::<OpenMeteoResponse>(stack, rx_buf, TEMP_API).await {
+        let weather = response.current;
+
         info!(
             "Temp: {}C, Code: {}",
-            response.current.temperature, response.current.weathercode
+            weather.temperature, weather.weathercode
         );
 
         let mut data = WEATHER.lock().await;
-        *data = Some(response.current);
+        *data = Some(weather);
+
+        flash::save_state(flash_device, &weather).await;
     }
 }
 

@@ -2085,7 +2085,7 @@ dependencies = [
  "embedded-hal-bus",
  "embedded-io-async",
  "embedded-sdmmc",
- "embedded-storage",
+ "embedded-storage-async",
  "embedded-text",
  "fixed",
  "fixed-macro",

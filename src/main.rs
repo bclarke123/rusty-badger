@@ -3,6 +3,7 @@
 
 mod buttons;
 mod display;
+mod flash;
 mod helpers;
 mod http;
 mod image;
@@ -12,8 +13,9 @@ mod time;
 mod wifi;
 
 use crate::buttons::{handle_presses, listen_to_button};
+use crate::flash::FlashDriver;
 use crate::led::blink;
-use crate::state::{Button, DISPLAY_CHANGED, POWER_MUTEX, Screen};
+use crate::state::{Button, DISPLAY_CHANGED, POWER_MUTEX, Screen, WEATHER};
 use crate::time::{check_trust_time, get_time, update_time};
 use cyw43_pio::{DEFAULT_CLOCK_DIVIDER, PioSpi};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
@@ -46,15 +48,18 @@ type SharedI2c = I2cDevice<'static, ThreadModeRawMutex, AsyncI2c0>;
 type RtcDriver = PCF85063<SharedI2c>;
 
 pub type RtcDevice = MutexObj<RtcDriver>;
+static RTC_DEVICE: StaticCell<RtcDevice> = StaticCell::new();
+
 pub type UserLed = MutexObj<Pwm<'static>>;
+static USER_LED: StaticCell<UserLed> = StaticCell::new();
+
+pub type FlashDevice = MutexObj<FlashDriver>;
+static FLASH_DEVICE: StaticCell<FlashDevice> = StaticCell::new();
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<peripherals::PIO0>;
     I2C0_IRQ => i2c::InterruptHandler<peripherals::I2C0>;
 });
-
-static RTC_DEVICE: StaticCell<RtcDevice> = StaticCell::new();
-static USER_LED: StaticCell<UserLed> = StaticCell::new();
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -69,6 +74,7 @@ async fn main(spawner: Spawner) {
 
     let user_led = USER_LED.init(Mutex::new(pwm));
     let rtc_device;
+    let flash_device;
 
     blink(user_led, 1).await;
 
@@ -107,6 +113,14 @@ async fn main(spawner: Spawner) {
         get_time(rtc_device).await;
 
         spawner.spawn(update_time(rtc_device)).ok();
+    }
+
+    // Load most recent weather data
+    {
+        let flashdev = FlashDriver::new(p.FLASH, p.DMA_CH3);
+        flash_device = FLASH_DEVICE.init(Mutex::new(flashdev));
+        let mut weather = WEATHER.lock().await;
+        *weather = flash::load_state(flash_device).await;
     }
 
     // SPI e-ink display
@@ -183,7 +197,13 @@ async fn main(spawner: Spawner) {
         spawner.must_spawn(net_task(netrunner));
 
         spawner
-            .spawn(wifi::run(control, stack, user_led, rtc_device))
+            .spawn(wifi::run(
+                control,
+                stack,
+                user_led,
+                rtc_device,
+                flash_device,
+            ))
             .ok();
     }
 }
