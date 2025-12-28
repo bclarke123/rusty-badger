@@ -203,27 +203,12 @@ async fn draw_badge<SPI: SpiDevice>(display: &mut Display<SPI>) {
 }
 
 fn get_display_time(time: PrimitiveDateTime) -> String<10> {
-    let mut am = true;
-    let twelve_hour = if time.hour() == 0 {
-        12
-    } else if time.hour() == 12 {
-        am = false;
-        12
-    } else if time.hour() > 12 {
-        am = false;
-        time.hour() - 12
-    } else {
-        time.hour()
+    let (hour, am) = match time.hour() {
+        x if x > 12 => (x - 12, "PM"),
+        x => (x, "AM"),
     };
 
-    let am_pm = if am { "AM" } else { "PM" };
-
-    easy_format::<10>(format_args!(
-        "| {:02}:{:02} {}",
-        twelve_hour,
-        time.minute(),
-        am_pm
-    ))
+    easy_format::<10>(format_args!("| {:02}:{:02} {}", hour, time.minute(), am))
 }
 
 fn weather_description(code: u8) -> &'static str {
