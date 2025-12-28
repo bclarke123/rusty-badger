@@ -65,8 +65,6 @@ async fn sync(
         .await;
 
         control.leave().await;
-
-        DISPLAY_CHANGED.signal(Screen::TopBar);
     }
 }
 
@@ -93,6 +91,7 @@ pub async fn run(
         )
         .await;
 
+        DISPLAY_CHANGED.signal(Screen::TopBar);
         led::blink(user_led, 2).await;
 
         select(Timer::after_secs(3600), UPDATE_WEATHER.wait()).await;
