@@ -30,3 +30,11 @@ pub fn prev() {
     }) - 1;
     CURRENT_IMAGE.store(prev, Ordering::Relaxed);
 }
+
+pub fn set(index: usize) {
+    CURRENT_IMAGE.store(index.clamp(0, IMAGES.len() - 1), Ordering::Relaxed);
+}
+
+pub fn get() -> usize {
+    CURRENT_IMAGE.load(Ordering::Relaxed)
+}
