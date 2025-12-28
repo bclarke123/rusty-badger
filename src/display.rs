@@ -40,11 +40,12 @@ pub async fn run(
 
     loop {
         let to_update = DISPLAY_CHANGED.wait().await;
-        update_screen(&mut display, &to_update).await;
 
         if matches!(to_update, Screen::Shutdown) {
             break;
         }
+
+        update_screen(&mut display, &to_update).await;
     }
 
     display.off().await.ok();
@@ -59,14 +60,12 @@ async fn update_screen<SPI: SpiDevice>(display: &mut Display<SPI>, to_update: &S
     let _guard = POWER_MUTEX.lock().await;
     display.enable();
 
-    match to_update {
-        Screen::Full => {
-            display.setup(LUT::Medium).await.ok();
-        }
-        _ => {
-            display.setup(LUT::Fast).await.ok();
-        }
-    }
+    let lut = match to_update {
+        Screen::Full => LUT::Medium,
+        _ => LUT::Fast,
+    };
+
+    display.setup(lut).await.ok();
 
     match to_update {
         Screen::Full => {
