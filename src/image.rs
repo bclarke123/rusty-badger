@@ -15,6 +15,12 @@ pub fn get_position() -> (i32, i32) {
     (0, 24)
 }
 
+pub enum Shift {
+    None,
+    Next,
+    Prev,
+}
+
 pub fn next() {
     let current_image = CURRENT_IMAGE.load(Ordering::Relaxed);
     let next = (current_image + 1) % IMAGES.len();
@@ -29,6 +35,14 @@ pub fn prev() {
         current_image
     }) - 1;
     CURRENT_IMAGE.store(prev, Ordering::Relaxed);
+}
+
+pub fn shift(dir: Shift) {
+    match dir {
+        Shift::Next => next(),
+        Shift::Prev => prev(),
+        _ => {}
+    }
 }
 
 pub fn set(index: usize) {

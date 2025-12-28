@@ -14,6 +14,7 @@ mod wifi;
 
 use crate::buttons::{handle_presses, listen_to_button};
 use crate::flash::FlashDriver;
+use crate::image::Shift;
 use crate::led::blink;
 use crate::state::{Button, DISPLAY_CHANGED, POWER_MUTEX, Screen};
 use crate::time::{check_trust_time, get_time, update_time};
@@ -77,7 +78,7 @@ async fn main(spawner: Spawner) {
     let mut is_rtc_alarm = false;
     let mut external_power = false;
     let mut screen_refresh_type = Screen::None;
-    let mut image_dir = 0;
+    let mut image_dir = Shift::None;
 
     // Button handlers
     let mut up = Input::new(p.PIN_15, Pull::Down);
@@ -89,12 +90,12 @@ async fn main(spawner: Spawner) {
 
     if up.is_high() {
         // Up
-        image_dir = -1;
+        image_dir = Shift::Prev;
         screen_refresh_type = Screen::Image;
         up.wait_for_low().await;
     } else if down.is_high() {
         // Down
-        image_dir = 1;
+        image_dir = Shift::Next;
         screen_refresh_type = Screen::Image;
         down.wait_for_low().await;
     } else if a.is_high() {
@@ -168,17 +169,7 @@ async fn main(spawner: Spawner) {
         }
 
         image::set(rtc.read_ram_byte().await.unwrap_or(0) as usize);
-
-        match image_dir {
-            -1 => {
-                image::prev();
-            }
-            1 => {
-                image::next();
-            }
-            _ => {}
-        }
-
+        image::shift(image_dir);
         rtc.write_ram_byte(image::get() as u8).await.ok();
     }
 
