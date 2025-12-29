@@ -1,7 +1,7 @@
 use cyw43::{Control, JoinOptions};
 use embassy_futures::{join::join, select::select};
 use embassy_net::Stack;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Timer, with_timeout};
 use log::info;
 
 use crate::{
@@ -22,21 +22,22 @@ async fn connect(control: &mut Control<'_>, stack: &Stack<'_>) -> Result<(), ()>
 
     let mut connected_to_wifi = false;
 
-    for _ in 0..30 {
-        match control
-            .join(WIFI_SSID, JoinOptions::new(WIFI_PASSWORD))
-            .await
-        {
-            Ok(_) => {
-                connected_to_wifi = true;
-                info!("join successful");
-                break;
-            }
-            Err(err) => {
-                info!("join failed with status={}", err.status);
-            }
+    match with_timeout(
+        Duration::from_secs(20),
+        control.join(WIFI_SSID, JoinOptions::new(WIFI_PASSWORD)),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {
+            connected_to_wifi = true;
+            info!("join successful");
         }
-        Timer::after(Duration::from_secs(1)).await;
+        Ok(Err(err)) => {
+            info!("join failed with status={}", err.status);
+        }
+        Err(_) => {
+            info!("join timed out");
+        }
     }
 
     if !connected_to_wifi {
@@ -81,12 +82,15 @@ pub async fn run(
     loop {
         select(
             led::loop_breathe(user_led),
-            sync(
-                &mut rx_buffer,
-                &mut control,
-                stack,
-                rtc_device,
-                flash_driver,
+            with_timeout(
+                Duration::from_secs(30),
+                sync(
+                    &mut rx_buffer,
+                    &mut control,
+                    stack,
+                    rtc_device,
+                    flash_driver,
+                ),
             ),
         )
         .await;
@@ -109,12 +113,15 @@ pub async fn run_once(
 
     select(
         led::loop_breathe(user_led),
-        sync(
-            &mut rx_buffer,
-            &mut control,
-            stack,
-            rtc_device,
-            flash_device,
+        with_timeout(
+            Duration::from_secs(30),
+            sync(
+                &mut rx_buffer,
+                &mut control,
+                stack,
+                rtc_device,
+                flash_device,
+            ),
         ),
     )
     .await;
