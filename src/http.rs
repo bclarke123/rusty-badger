@@ -1,4 +1,3 @@
-use core::sync::atomic::Ordering;
 use defmt::{Format, error};
 use embassy_net::Stack;
 use embassy_net::dns::DnsSocket;
@@ -10,8 +9,8 @@ use reqwless::request::{Method, RequestBuilder};
 use serde::Deserialize;
 use time::{Date, Month, PrimitiveDateTime, Time};
 
-use crate::state::{CurrentWeather, POWER_MUTEX, RTC_TIME, WEATHER};
-use crate::time::TRUST_TIME;
+use crate::state::{CurrentWeather, POWER_MUTEX, WEATHER};
+use crate::time::set_time;
 use crate::{FlashDevice, RtcDevice, flash};
 
 static TIME_API: &str = env!("TIME_API");
@@ -84,23 +83,11 @@ where
     }
 }
 
-pub async fn fetch_time(stack: &Stack<'_>, rx_buf: &mut [u8], rtc_device: &RtcDevice) {
+pub async fn fetch_time(stack: &Stack<'_>, rx_buf: &mut [u8], rtc_device: &'static RtcDevice) {
     let _guard = POWER_MUTEX.lock().await;
 
     if let Ok(response) = fetch_api::<TimeApiResponse>(stack, rx_buf, TIME_API).await {
-        let datetime: PrimitiveDateTime = response.into();
-
-        rtc_device
-            .lock()
-            .await
-            .set_datetime(&datetime)
-            .await
-            .expect("Failed to update RTC time");
-
-        TRUST_TIME.store(true, Ordering::Relaxed);
-
-        let mut data = RTC_TIME.lock().await;
-        *data = Some(datetime);
+        set_time(rtc_device, response.into()).await;
     }
 }
 

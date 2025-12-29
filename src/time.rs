@@ -1,6 +1,7 @@
 use core::sync::atomic::Ordering;
 use embassy_time::Timer;
 use portable_atomic::AtomicBool;
+use time::PrimitiveDateTime;
 
 use crate::{
     RtcDevice,
@@ -18,6 +19,20 @@ pub async fn get_time(rtc_device: &'static RtcDevice) {
     let result = rtc_device.lock().await.get_datetime().await.ok();
     let mut data = RTC_TIME.lock().await;
     *data = result;
+}
+
+pub async fn set_time(rtc_device: &'static RtcDevice, now: PrimitiveDateTime) {
+    rtc_device
+        .lock()
+        .await
+        .set_datetime(&now)
+        .await
+        .expect("Failed to update RTC time");
+
+    TRUST_TIME.store(true, Ordering::Relaxed);
+
+    let mut data = RTC_TIME.lock().await;
+    *data = Some(now);
 }
 
 pub async fn check_trust_time(rtc_device: &'static RtcDevice) {
